@@ -201,8 +201,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 const tg=window.Telegram&&Telegram.WebApp; if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#1f2937");tg.setBackgroundColor("#14161c")}catch(e){}}
 const user=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user)||{first_name:"Player"};
 const L="BINGO",COL=["B","I","N","G","O"],CL=["#3b82f6","#6366f1","#a855f7","#10c98a","#ff8a1f"];
-const DEPOSIT_ACCOUNTS={telebirr:{label:'Telebirr',icon:'📱',number:'09XXXXXXXX',name:'ACCOUNT HOLDER NAME'},cbe:{label:'CBE (Commercial Bank of Ethiopia)',icon:'🏦',number:'1000XXXXXXXXX',name:'ACCOUNT HOLDER NAME'}};
-const MIN_DEP=10,MIN_WD=50;
+const DEPOSIT_ACCOUNTS={telebirr:{label:'Telebirr',icon:'📱',number:'0958828304',name:'AMANUEL'},boa:{label:'Bank of Abyssinia (BOA)',icon:'🏦',number:'266199511',name:'AMANUEL YISMAH'}};
+const MIN_DEP=30,MIN_WD=50;
 const WITHDRAW_METHODS={telebirr:{label:'Telebirr',icon:'📱'},cbe:{label:'CBE',icon:'🏦'},boa:{label:'Bank of Abyssinia (BOA)',icon:'🏦'},oromia:{label:'Oromia Bank',icon:'🏦'},dashen:{label:'Dashen Bank',icon:'🏦'}};
 /* Voice files: sounds/1.m4a ... sounds/75.m4a (number 1-75 = B1 ... O75) */
 const VOICE_DIR='';
@@ -231,7 +231,7 @@ function drawCard(el,card,marked,winCells){
 }
 
 /* LOBBY */
-function genTaken(){st.taken={};for(let i=0;i<120;i++){const n=1+Math.floor(Math.random()*TOTAL);if(!st.cards.includes(n))st.taken[n]=1}}
+function genTaken(){st.taken={}}   // real taken cartelas will come from the server
 function renderPicks(){
   let h="";
   for(let i=1;i<=TOTAL;i++)h+=`<div class="n${st.cards.includes(i)?" mine":st.taken[i]?" taken":""}" onclick="pick(${i})">${i}</div>`;
@@ -270,7 +270,7 @@ function buildBoard(){
 function startGame(){
   $("gnav").style.display="none";
   st.over=false;st.called=[];st.playing=st.cards.length>0;
-  const players=Math.min(TOTAL,Math.max(st.cards.length,80+Math.floor(Math.random()*(TOTAL-79))));   // never more than the 400 cartelas
+  const players=st.cards.length;   // only real players (no simulated ones)
   $("gid").textContent=Math.random().toString(36).slice(2,11).toUpperCase();
   $("pl").textContent=players;$("bet").textContent=STAKE;
   $("der").textContent=Math.floor(players*STAKE*0.8);$("cl").textContent=0;
@@ -299,8 +299,6 @@ function call(n){
   $("big").innerHTML=`<div class="ball">${letter(n)}-${n}</div>`;
   if(st.auto)playNum(n);
   if(st.playing){renderMine();if(st.auto){for(const c of st.cards){const w=check(makeCard(c));if(w){endGame(user.first_name,c,w);break}}}}
-  // simulated opponent wins once enough numbers are out
-  if(!st.over&&st.called.length>=12&&Math.random()<0.06){const c=1+Math.floor(Math.random()*TOTAL);endGame("Player"+c,c,check(makeCard(c),true))}
 }
 function renderMine(){const m=$("mycard");m.innerHTML=st.cards.map((c,k)=>`<div class="card" id="mc${k}"></div><div class="cartela">CARTELA # ${c}</div>`).join("");st.cards.forEach((c,k)=>drawCard($("mc"+k),makeCard(c),st.called))}
 function setAct(){const a=$("act");if(!st.playing){a.textContent="WATCHING";a.classList.add("dis");a.style.background="";a.style.color="";return}a.classList.remove("dis");a.textContent=st.auto?"AUTOMATIC":"BINGO";a.style.background=st.auto?"#00c27a":"#1a1d26";a.style.borderColor=st.auto?"#00c27a":"#5b6477";a.style.color=st.auto?"#0b1a55":"#fff"}
@@ -341,7 +339,7 @@ function resetLobby(){
 function leave(){clearInterval(st.timer);if(_cur){_cur.pause()}resetLobby()}
 function updHome(){$("hw").textContent=wallet.play;$("mw").textContent=wallet.main;$("pw").textContent=wallet.play}
 function backHome(){wallet.play+=STAKE*st.cards.length;st.cards=[];$("prev").style.display="none";goHome()}
-function refreshLobby(){const add=5+Math.floor(Math.random()*11);for(let i=0;i<add;i++){const n=1+Math.floor(Math.random()*TOTAL);if(!st.cards.includes(n))st.taken[n]=1}renderPicks()}   // taken cartelas stay taken; refresh only adds new ones
+function refreshLobby(){renderPicks()}
 function goHome(){clearInterval(st.lobbyT);updHome();$("gnav").style.display="flex";show("home");setNav(0)}
 function goLobby(){preloadVoices();$("gnav").style.display="flex";show("lobby");buildLobby()}
 function setNav(i){document.querySelectorAll("#gnav div").forEach((d,k)=>d.classList.toggle("on",k===i))}
@@ -368,8 +366,7 @@ document.addEventListener('click',function u(){const a=getAud(1);a.muted=true;co
           -> {top:[[name,games],...up to 10], me:{rank:<number|null>, played:<number>}}            */
 const LB_API="";
 const LB_KEY="aman_bingo_games_"+(user.id||"local");
-const DEMO={daily:[["PLAYER1",83],["PLAYER2",45],["PLAYER3",16],["PLAYER4",16],["PLAYER5",12],["PLAYER6",11],["PLAYER7",11],["PLAYER8",11],["PLAYER9",10],["PLAYER10",9]],
-  weekly:[["PLAYER1",2197],["PLAYER2",1726],["PLAYER3",1083],["PLAYER4",1068],["PLAYER5",1063],["PLAYER6",1041],["PLAYER7",1038],["PLAYER8",1037],["PLAYER9",1020],["PLAYER10",1004]]};
+const DEMO={daily:[],weekly:[]};
 function lbLoad(){try{const a=JSON.parse(localStorage.getItem(LB_KEY)||"[]");return Array.isArray(a)?a:[]}catch(e){return[]}}
 function lbMe(){return(user.username||user.first_name||"player").toUpperCase()}
 function recordGame(){
@@ -394,7 +391,7 @@ function lbLocal(per){
   if(played>0)list.push([me,played]);
   list.sort((x,y)=>y[1]-x[1]);
   const rank=played>0?list.findIndex(r=>r[0]===me&&r[1]===played)+1:null;
-  lbRender(per,list.slice(0,10),rank,played,"Demo mode — other players are sample data until a server is connected.");
+  lbRender(per,list.slice(0,10),rank,played,"Shared leaderboard needs the server — this shows only your own games.");
 }
 function scoresPage(per){
   per=per||"daily";
