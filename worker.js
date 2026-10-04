@@ -49,6 +49,11 @@ const tg = (env, method, body) => fetch(`https://api.telegram.org/bot${env.BOT_T
 const say = (env, chat, text, kb) => tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: kb ? { inline_keyboard: kb } : undefined });
 const playKb = env => [[{ text: 'Play 🎮', web_app: { url: env.GAME_URL } }]];
 
+/* ---------- bottom menu keyboard (Play Games / Deposit / Check Balance / Support) ---------- */
+const SUPPORT_URL = 'https://t.me/Amanbing2';
+const mainKb = { keyboard: [[{ text: '🎮 Play Games' }, { text: '💰 Deposit' }], [{ text: '💲 Check Balance' }, { text: '🧑‍💻 Support' }]], resize_keyboard: true, is_persistent: true };
+const BTN = { '🎮 Play Games': '/play', '💰 Deposit': '/deposit', '💲 Check Balance': '/balance', '🧑‍💻 Support': '/support' };
+
 /* ---------- money operations (each is one atomic batch) ---------- */
 async function tryMatch(env, txid) { // credit a pending deposit when a matching unclaimed SMS exists
   const db = env.DB;
@@ -144,7 +149,7 @@ async function onTelegram(env, up) {
     return tg(env, 'editMessageText', { chat_id: q.message.chat.id, message_id: q.message.message_id, text: q.message.text + (ok ? '\n\n✔ Done' : '\n\n(already processed)') });
   }
   const m = up.message; if (!m || !m.text) return;
-  const cmd = m.text.split(/[\s@]/)[0].toLowerCase(), uid = m.from.id; await refreshBonus(env, uid, Date.now()); const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(uid).first();
+  const cmd = BTN[m.text.trim()] || m.text.split(/[\s@]/)[0].toLowerCase(), uid = m.from.id; await refreshBonus(env, uid, Date.now()); const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(uid).first();
   if (cmd === '/balance') return say(env, uid, u ? `Balance: ${B(u.balance)} birr · Daily bonus: ${B(u.bonus_c)} birr` : 'Open the game to register first.', playKb(env));
   if (cmd === '/pending' && String(uid) === admin) {
     const d = (await db.prepare("SELECT d.*,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending'").all()).results, w = (await db.prepare("SELECT w.*,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status='pending'").all()).results;
@@ -153,7 +158,13 @@ async function onTelegram(env, up) {
     for (const x of w) await say(env, uid, withdrawText(x), [[{ text: '💸 Mark paid', callback_data: 'wp:' + x.id }, { text: '↩️ Reject', callback_data: 'wr:' + x.id }]]);
     return;
   }
-  const hint = { '/register': 'register', '/deposit': 'deposit', '/withdraw': 'withdraw', '/transfer': 'transfer', '/invite': 'invite friends', '/instruction': 'read the instructions', '/support': 'contact support' }[cmd];
+  if (cmd === '/start') {
+    await say(env, uid, 'Welcome to Aman Bingo! Tap Play to start.', playKb(env));
+    return tg(env, 'sendMessage', { chat_id: uid, text: 'Use the menu below 👇', reply_markup: mainKb });
+  }
+  if (cmd === '/play') return say(env, uid, 'Click below to play! 🎮', [[{ text: 'Open Game 🎮', web_app: { url: env.GAME_URL } }]]);
+  if (cmd === '/support') return say(env, uid, 'Need help? Contact our support team 👇', [[{ text: '🧑‍💻 Contact Support', url: SUPPORT_URL }]]);
+  const hint = { '/register': 'register', '/deposit': 'deposit', '/withdraw': 'withdraw', '/transfer': 'transfer', '/invite': 'invite friends', '/instruction': 'read the instructions' }[cmd];
   return say(env, uid, hint ? `Open the game to ${hint}.` : 'Welcome to Aman Bingo! Tap Play to start.', playKb(env));
 }
 const depositText = x => `💰 Deposit #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr via ${x.method}\nTransaction: ${x.txid}\nNo matching SMS yet — approve only if the money arrived.`;
