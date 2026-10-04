@@ -53,6 +53,11 @@ const playKb = env => [[{ text: 'Play 🎮', web_app: { url: env.GAME_URL } }]];
 const SUPPORT_URL = 'https://t.me/Amanbing2';
 const mainKb = { keyboard: [[{ text: '🎮 Play Games' }, { text: '💰 Deposit' }], [{ text: '💲 Check Balance' }, { text: '🧑‍💻 Support' }]], resize_keyboard: true, is_persistent: true };
 const BTN = { '🎮 Play Games': '/play', '💰 Deposit': '/deposit', '💲 Check Balance': '/balance', '🧑‍💻 Support': '/support' };
+const PAY = { // payment accounts shown to players (callback keys: t, b, d)
+  t: { name: 'Telebirr', acc: '0958828305', holder: 'Amanuel' },
+  b: { name: 'BOA', acc: '266199511', holder: 'Amanuel Yismah' },
+  d: { name: 'Dashen Bank', acc: '5901914597011', holder: 'Amanuel Yismah' } };
+const sayMenu = (env, chat, text) => tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: mainKb }); // plain text reply that keeps the 4 buttons on screen
 
 /* ---------- money operations (each is one atomic batch) ---------- */
 async function tryMatch(env, txid) { // credit a pending deposit when a matching unclaimed SMS exists
@@ -143,6 +148,12 @@ async function onTelegram(env, up) {
   const db = env.DB, admin = String(env.ADMIN_TG_ID);
   if (up.callback_query) {
     const q = up.callback_query, [a, id] = String(q.data).split(':');
+    if (a === 'pm') { // any player picked a payment method
+      const P = PAY[id], amt = Number(String(q.data).split(':')[2]);
+      await tg(env, 'answerCallbackQuery', { callback_query_id: q.id });
+      if (!P || !(amt >= MIN_DEP)) return;
+      return say(env, q.from.id, `💰 Deposit ${amt} birr via ${P.name}\n\nAccount: ${P.acc}\nName: ${P.holder}\n\nAfter sending, open the game, tap Deposit, and enter the transaction ID.`, [[{ text: 'Open Game 🎮', web_app: { url: env.GAME_URL } }]]);
+    }
     if (String(q.from.id) !== admin) return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: 'Admin only' });
     const ok = a === 'da' ? await decideDeposit(env, +id, true) : a === 'dr' ? await decideDeposit(env, +id, false) : a === 'wp' ? await decideWithdraw(env, +id, true) : a === 'wr' ? await decideWithdraw(env, +id, false) : false;
     await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: ok ? 'Done' : 'Already processed' });
@@ -150,13 +161,22 @@ async function onTelegram(env, up) {
   }
   const m = up.message; if (!m || !m.text) return;
   const cmd = BTN[m.text.trim()] || m.text.split(/[\s@]/)[0].toLowerCase(), uid = m.from.id; await refreshBonus(env, uid, Date.now()); const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(uid).first();
-  if (cmd === '/balance') return say(env, uid, u ? `Balance: ${B(u.balance)} birr · Daily bonus: ${B(u.bonus_c)} birr` : 'Open the game to register first.', playKb(env));
+  if (cmd === '/balance') return u ? sayMenu(env, uid, `💰 Balance: ${B(u.balance).toFixed(2)} ETB`) : say(env, uid, 'Open the game to register first.', playKb(env));
   if (cmd === '/pending' && String(uid) === admin) {
     const d = (await db.prepare("SELECT d.*,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending'").all()).results, w = (await db.prepare("SELECT w.*,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status='pending'").all()).results;
     if (!d.length && !w.length) return say(env, uid, 'Nothing pending ✅');
     for (const x of d) await say(env, uid, depositText(x), [[{ text: '✅ Approve', callback_data: 'da:' + x.id }, { text: '❌ Reject', callback_data: 'dr:' + x.id }]]);
     for (const x of w) await say(env, uid, withdrawText(x), [[{ text: '💸 Mark paid', callback_data: 'wp:' + x.id }, { text: '↩️ Reject', callback_data: 'wr:' + x.id }]]);
     return;
+  }
+  if (cmd === '/deposit') return sayMenu(env, uid, `💰 Enter the amount you want to deposit (numbers only).\n\nMinimum: ${MIN_DEP} birr or more.`);
+  if (/^\d+(\.\d+)?$/.test(m.text.trim())) { // user typed an amount
+    const amt = Number(m.text.trim());
+    if (amt < MIN_DEP) return sayMenu(env, uid, `❌ Minimum deposit is ${MIN_DEP} birr. Enter ${MIN_DEP} or more.`);
+    return say(env, uid, `💰 Deposit ${amt} birr\n\nChoose the payment method you will send from 👇`, [
+      [{ text: 'Telebirr', callback_data: 'pm:t:' + amt }],
+      [{ text: 'BOA', callback_data: 'pm:b:' + amt }],
+      [{ text: 'Dashen Bank', callback_data: 'pm:d:' + amt }]]);
   }
   if (cmd === '/start') {
     await say(env, uid, 'Welcome to Aman Bingo! Tap Play to start.', playKb(env));
@@ -165,7 +185,9 @@ async function onTelegram(env, up) {
   if (cmd === '/play') return say(env, uid, 'Click below to play! 🎮', [[{ text: 'Open Game 🎮', web_app: { url: env.GAME_URL } }]]);
   if (cmd === '/support') return say(env, uid, 'Need help? Contact our support team 👇', [[{ text: '🧑‍💻 Contact Support', url: SUPPORT_URL }]]);
   const hint = { '/register': 'register', '/deposit': 'deposit', '/withdraw': 'withdraw', '/transfer': 'transfer', '/invite': 'invite friends', '/instruction': 'read the instructions' }[cmd];
-  return say(env, uid, hint ? `Open the game to ${hint}.` : 'Welcome to Aman Bingo! Tap Play to start.', playKb(env));
+  if (hint) return say(env, uid, `Open the game to ${hint}.`, playKb(env));
+  await say(env, uid, 'Welcome to Aman Bingo! Tap Play to start.', playKb(env));
+  return tg(env, 'sendMessage', { chat_id: uid, text: 'Use the menu below 👇', reply_markup: mainKb });
 }
 const depositText = x => `💰 Deposit #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr via ${x.method}\nTransaction: ${x.txid}\nNo matching SMS yet — approve only if the money arrived.`;
 const withdrawText = x => `💸 Withdrawal #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr\nSend to: ${x.method} ${x.account}`;
@@ -211,7 +233,7 @@ async function route(req, env, url) {
     return J(await stateFor(env, u));
   }
   if (p === '/api/deposit') {
-    const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = b.method === 'boa' ? 'boa' : 'telebirr';
+    const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = ['boa', 'dashen'].includes(b.method) ? b.method : 'telebirr';
     if (!(amt >= MIN_DEP) || txid.length < 8 || txid.length > 14) return J({ error: 'bad_input', min: MIN_DEP }, 400);
     let id; try { id = (await db.prepare('INSERT INTO deposits(user_id,txid,amount_c,method,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, txid, C(amt), method, 'pending', now).run()).meta.last_row_id } catch (e) { return J({ error: 'txid_used' }, 409) }
     const ok = method === 'telebirr' && await tryMatch(env, txid);
