@@ -206,6 +206,7 @@ function leaveGame(){inGame=false;$("win").classList.remove("on");goHome()}
 
 /* wallet */
 const SL=x=>({pending:"Pending",paid:"Approved",approved:"Approved",rejected:"Rejected"}[x]||x),SC=x=>x==="paid"||x==="approved"?"#18d98b":x==="rejected"?"#ff3d71":"#ffd23f";
+const hrows=me=>[...me.deposits.filter(x=>x.status==="approved").map(x=>["Deposit",x]),...me.withdrawals.map(x=>["Withdraw",x])].map(([t,x])=>t==="Deposit"?`<div class="li"><span>Deposit ${F(x.amount)}</span><span></span></div>`:`<div class="li"><span>Withdraw ${F(x.amount)}</span><span style="color:${SC(x.status)}">${SL(x.status)}</span></div>`).join("");
 let sel="telebirr",wsel="telebirr",pendW=false;const WM={telebirr:"Telebirr",boa:"BOA",dashen:"Dashen Bank",cbe:"CBE"};
 function wmSel(k){wsel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="wm_"+k))}
 function opts(){return Object.keys(PAY).map(k=>`<option value="${k}">${PAY[k].n}</option>`).join("")}
@@ -216,13 +217,13 @@ function wf(t){
   :Object.keys(WM).map(k=>`<div class="mth" id="wm_${k}" onclick="wmSel('${k}')"><img src="${IMG[k]}"><div><b>${WM[k]}</b><small>Receive here</small></div></div>`).join("")+`<input class="inp" id="fa2" placeholder="Your account number / phone"><input class="inp" id="fa3" placeholder="Account holder name"><input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="Amount (min 50 birr)"><button class="gb" onclick="wd()">Request withdrawal</button>`;
   if(t==="d")pmSel(sel);else wmSel(wsel)}
 async function openWallet(){show("wal");setNav(3);$("wform").innerHTML="";try{const me=await api("/api/me");$("wb").textContent=F(me.balance);$("wbn").textContent=F(me.bonus);pendW=me.withdrawals.some(x=>x.status==="pending");
-  $("whist").innerHTML=[...me.deposits.map(x=>["Deposit",x]),...me.withdrawals.map(x=>["Withdraw",x])].map(([t,x])=>`<div class="li"><span>${t} ${F(x.amount)}</span><span style="color:${SC(x.status)}">${SL(x.status)}</span></div>`).join("")}catch(e){toast(ERR[e]||e)}}
-async function dep(){try{const d=await api("/api/deposit",{amount:$("fa1").value,txid:$("fa2").value,method:sel});toast(d.status==="approved"?"✅ Deposit received":"✅ Request sent - pending confirmation");openWallet()}catch(e){toast(ERR[e]||e)}}
+  $("whist").innerHTML=hrows(me)}catch(e){toast(ERR[e]||e)}}
+async function dep(){try{const d=await api("/api/deposit",{amount:$("fa1").value,txid:$("fa2").value,method:sel});toast(d.status==="approved"?"✅ Deposit received":"✅ Deposit submitted. Your balance updates as soon as it is confirmed.");openWallet()}catch(e){toast(ERR[e]||e)}}
 async function wd(){try{await api("/api/withdraw",{amount:$("fa1").value,account:$("fa2").value,name:$("fa3").value,method:wsel});toast("✅ Withdrawal requested - Pending");openWallet()}catch(e){toast(ERR[e]||e)}}
 function tabTo(i){inGame=false;$("win").classList.remove("on");setNav(i);if(i===0){goHome();return}if(i===3){openWallet();return}show("tab");$("tabc").innerHTML='<p class="hint">…</p>';if(i===1)scoresPage("daily");else if(i===2)histPage();else profPage()}
 async function scoresPage(p){try{const d=await api("/api/leaderboard?period="+p),me=d.me||{},on=";background:var(--gr);color:#08301f";
   $("tabc").innerHTML=`<div class="li"><span>My rank</span><span>${me.rank?"#"+me.rank:"—"} · ${me.played||0} games</span></div><div class="row"><button class="gb" style="flex:1${p==="daily"?on:""}" onclick="scoresPage('daily')">DAILY</button><button class="gb" style="flex:1${p==="weekly"?on:""}" onclick="scoresPage('weekly')">WEEKLY</button></div><p class="hint">TOP 10 PLAYERS</p>`+(d.top||[]).map((r,i)=>`<div class="li"><span>${i+1}. ${esc(r[0])}</span><span>${r[1]} games</span></div>`).join("")}catch(e){toast(ERR[e]||e)}}
-async function histPage(){try{const me=await api("/api/me"),rows=[...me.deposits.map(x=>["Deposit",x]),...me.withdrawals.map(x=>["Withdraw",x])];$("tabc").innerHTML=rows.length?rows.map(([t,x])=>`<div class="li"><span>${t} ${F(x.amount)}</span><span style="color:${SC(x.status)}">${SL(x.status)}</span></div>`).join(""):'<p class="hint">No history yet.</p>'}catch(e){toast(ERR[e]||e)}}
+async function histPage(){try{const me=await api("/api/me"),h=hrows(me);$("tabc").innerHTML=h||'<p class="hint">No history yet.</p>'}catch(e){toast(ERR[e]||e)}}
 async function profPage(){try{const me=await api("/api/me");$("tabc").innerHTML=`<div class="li"><span>Name</span><span>${esc(me.name)}</span></div><div class="li"><span>Telegram ID</span><span>${me.id}</span></div><div class="li"><span>Phone</span><span>${esc(me.phone||"-")}</span></div>`}catch(e){toast(ERR[e]||e)}}
 buildBoard();
 boot();
