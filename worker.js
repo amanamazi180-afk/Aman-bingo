@@ -6,6 +6,7 @@ const C = x => Math.round(Number(x) * 100), B = c => c / 100;
 const REG_BONUS_C = C(10); // one-time registration gift (stake money). The daily 08:00 bonus is switched off.
 const bonusC = env => REG_BONUS_C; // most bonus a player can hold (used when refunding stakes)
 const refreshBonus = () => Promise.resolve(); // daily bonus reset removed
+const AUTO_MAX_C = C(1000), DASHEN_WINDOW_MS = 30 * 60 * 1000; // Dashen deposits above 1000 birr, or unclear matches, still need your approval
 const rnd32 = () => crypto.getRandomValues(new Uint32Array(1))[0];
 const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { 'content-type': 'application/json' } });
 
@@ -33,6 +34,13 @@ export function parseSms(t) { // Telebirr "received" message
   const amt = t.match(/([\d,]+(?:\.\d+)?)\s*ብር\s*በ\s*\d{2}\/\d{2}\/\d{4}/), id = t.match(/ቁጥርዎ\s+([A-Z0-9]{8,14})/i);
   if (!amt || !id || !/ተቀብለዋል/.test(t)) return null;
   return { amount_c: C(amt[1].replace(/,/g, '')), txid: id[1].toUpperCase() };
+}
+export function parseDashen(t) { // Dashen Bank "credited" message (it has no transaction id, so we match by amount + sender phone + time)
+  t = String(t || '');
+  const a = t.match(/credited with ETB\s*([\d,]+(?:\.\d+)?)/i);
+  if (!a || !/Dashen/i.test(t)) return null;
+  const ph = t.match(/Phone Number:\s*(\+?\d{9,13})/i), dt = t.match(/on\s+(\d{2}\/\d{2}\/\d{4})\s+at\s+(\d{2}:\d{2}:\d{2}\s*[AP]M)/i);
+  return { amount_c: C(a[1].replace(/,/g, '')), phone: ph ? normPhone(ph[1]) : null, stamp: dt ? dt[1] + ' ' + dt[2] : null };
 }
 export function normPhone(p) { p = String(p || '').replace(/[\s-]/g, ''); if (/^\+?251[79]\d{8}$/.test(p)) p = '0' + p.replace(/^\+?251/, ''); return /^0[79]\d{8}$/.test(p) ? p : null }
 
@@ -74,6 +82,30 @@ async function tryMatch(env, txid) { // credit a pending deposit when a matching
   if (r[1].meta.changes > 0) { const d = await db.prepare('SELECT user_id,amount_c FROM deposits WHERE txid=?').bind(txid).first(); say(env, d.user_id, `✅ የ${B(d.amount_c)} ብር ዲፖዚት ደርሷል።`, playKb(env)); return true }
   return false;
 }
+async function approveWithSms(env, depId, smsTx) {
+  const db = env.DB;
+  const r = await db.batch([
+    db.prepare("UPDATE users SET balance=balance+(SELECT d.amount_c FROM deposits d WHERE d.id=?1) WHERE id=(SELECT d.user_id FROM deposits d JOIN sms_log s ON s.txid=?2 WHERE d.id=?1 AND d.status='pending' AND s.claimed=0 AND s.amount_c=d.amount_c)").bind(depId, smsTx),
+    db.prepare("UPDATE deposits SET status='approved',note='auto' WHERE id=?1 AND status='pending' AND EXISTS(SELECT 1 FROM sms_log s WHERE s.txid=?2 AND s.claimed=0 AND s.amount_c=deposits.amount_c)").bind(depId, smsTx),
+    db.prepare("UPDATE sms_log SET claimed=1 WHERE txid=?1 AND claimed=0 AND EXISTS(SELECT 1 FROM deposits d WHERE d.id=?2 AND d.status='approved' AND d.note='auto')").bind(smsTx, depId)]);
+  if (r[1].meta.changes > 0) { const d = await db.prepare('SELECT user_id,amount_c FROM deposits WHERE id=?').bind(depId).first(); say(env, d.user_id, `✅ የ${B(d.amount_c)} ብር ዲፖዚት ደርሷል።`, playKb(env)); return true }
+  return false;
+}
+async function tryMatchDashen(env, smsTx, amount_c, phone) { // a Dashen SMS arrived: credit the one waiting Dashen deposit of the same amount
+  if (amount_c > AUTO_MAX_C) return false;
+  const c = (await env.DB.prepare("SELECT d.id,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.method='dashen' AND d.status='pending' AND d.amount_c=?1 AND d.ts>=?2").bind(amount_c, Date.now() - DASHEN_WINDOW_MS).all()).results;
+  const ok = phone ? c.filter(x => x.phone === phone) : c;
+  return ok.length === 1 && c.length === 1 ? approveWithSms(env, ok[0].id, smsTx) : false;
+}
+async function tryMatchDashenDeposit(env, depId) { // a Dashen deposit was submitted: look for an unclaimed Dashen SMS of the same amount
+  const db = env.DB, d = await db.prepare("SELECT d.*,u.phone uphone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.id=?").bind(depId).first();
+  if (!d || d.method !== 'dashen' || d.status !== 'pending' || d.amount_c > AUTO_MAX_C) return false;
+  const sms = (await db.prepare("SELECT txid,raw FROM sms_log WHERE txid LIKE 'DSN%' AND claimed=0 AND amount_c=?1 AND ts>=?2").bind(d.amount_c, Date.now() - DASHEN_WINDOW_MS).all()).results;
+  const ok = sms.filter(x => { const p = parseDashen(x.raw); return !p || !p.phone || p.phone === d.uphone });
+  const rivals = (await db.prepare("SELECT COUNT(*) n FROM deposits WHERE method='dashen' AND status='pending' AND amount_c=?1 AND ts>=?2").bind(d.amount_c, Date.now() - DASHEN_WINDOW_MS).first()).n;
+  return ok.length === 1 && sms.length === 1 && rivals === 1 ? approveWithSms(env, depId, ok[0].txid) : false;
+}
+const autoMatch = (env, method, txid, id) => method === 'telebirr' ? tryMatch(env, txid) : method === 'dashen' ? tryMatchDashenDeposit(env, id) : false;
 async function decideDeposit(env, id, ok) {
   const db = env.DB;
   const r = await db.batch(ok ? [
@@ -98,7 +130,7 @@ async function submitDeposit(env, u, amt, txidRaw, method) { // same logic as /a
   const db = env.DB, now = Date.now(), txid = String(txidRaw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (txid.length < 8 || txid.length > 14) return 'bad_txid';
   let id; try { id = (await db.prepare('INSERT INTO deposits(user_id,txid,amount_c,method,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, txid, C(amt), method, 'pending', now).run()).meta.last_row_id } catch (e) { return 'txid_used' }
-  const ok = method === 'telebirr' && await tryMatch(env, txid);
+  const ok = await autoMatch(env, method, txid, id);
   if (!ok) await say(env, env.ADMIN_TG_ID, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid }), [[{ text: '✅ Approve', callback_data: 'da:' + id }, { text: '❌ Reject', callback_data: 'dr:' + id }]]);
   return ok ? 'approved' : 'pending';
 }
@@ -248,7 +280,13 @@ async function route(req, env, url) {
   if (p === '/sms' && req.method === 'POST') { // phone forwards incoming Telebirr SMS here
     if (req.headers.get('x-secret') !== env.SMS_SECRET) return J({ error: 'forbidden' }, 403);
     const raw = await req.text(); let text = raw; try { const o = JSON.parse(raw); text = o.text || o.message || o.body || o.content || raw } catch (e) { }
-    const s = parseSms(text); if (!s) return J({ ok: true, parsed: false });
+    const s = parseSms(text);
+    if (!s) {
+      const ds = parseDashen(text); if (!ds) return J({ ok: true, parsed: false });
+      const tx = 'DSN' + (ds.stamp || String(now)).replace(/\D/g, '') + ds.amount_c;
+      await db.prepare('INSERT OR IGNORE INTO sms_log(txid,amount_c,raw,ts) VALUES(?,?,?,?)').bind(tx, ds.amount_c, String(text).slice(0, 500), now).run();
+      await tryMatchDashen(env, tx, ds.amount_c, ds.phone); return J({ ok: true, parsed: true });
+    }
     await db.prepare('INSERT OR IGNORE INTO sms_log(txid,amount_c,raw,ts) VALUES(?,?,?,?)').bind(s.txid, s.amount_c, String(text).slice(0, 500), now).run();
     await tryMatch(env, s.txid); return J({ ok: true, parsed: true });
   }
@@ -284,13 +322,14 @@ async function route(req, env, url) {
     const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = ['boa', 'dashen'].includes(b.method) ? b.method : 'telebirr';
     if (!(amt >= MIN_DEP) || txid.length < 8 || txid.length > 14) return J({ error: 'bad_input', min: MIN_DEP }, 400);
     let id; try { id = (await db.prepare('INSERT INTO deposits(user_id,txid,amount_c,method,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, txid, C(amt), method, 'pending', now).run()).meta.last_row_id } catch (e) { return J({ error: 'txid_used' }, 409) }
-    const ok = method === 'telebirr' && await tryMatch(env, txid);
+    const ok = await autoMatch(env, method, txid, id);
     if (!ok) await say(env, env.ADMIN_TG_ID, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid }), [[{ text: '✅ Approve', callback_data: 'da:' + id }, { text: '❌ Reject', callback_data: 'dr:' + id }]]);
     return J({ status: ok ? 'approved' : 'pending', balance: B((await db.prepare('SELECT balance FROM users WHERE id=?').bind(u.id).first()).balance) });
   }
   if (p === '/api/withdraw') {
-    const amt = Number(b.amount), account = String(b.account || '').trim().slice(0, 40), method = String(b.method || 'telebirr').slice(0, 20);
-    if (!(amt >= MIN_WD) || !account) return J({ error: 'bad_input', min: MIN_WD }, 400);
+    const amt = Number(b.amount), acct = String(b.account || '').trim().slice(0, 40), hn = String(b.name || '').trim().slice(0, 40), account = acct + ' · ' + hn, method = String(b.method || 'telebirr').slice(0, 20);
+    if (!(amt >= MIN_WD) || !acct || hn.length < 3) return J({ error: 'bad_input', min: MIN_WD }, 400);
+    if (await db.prepare("SELECT 1 x FROM withdrawals WHERE user_id=? AND status='pending' LIMIT 1").bind(u.id).first()) return J({ error: 'withdraw_pending' }, 409); // one pending withdrawal at a time
     if (!(await db.prepare("SELECT 1 x FROM deposits WHERE user_id=? AND status='approved' LIMIT 1").bind(u.id).first())) return J({ error: 'deposit_required' }, 403); // bonus-farming guard: deposit once before withdrawing
     let id; try { const r = await db.batch([db.prepare('UPDATE users SET balance=balance-?2 WHERE id=?1').bind(u.id, C(amt)), db.prepare('INSERT INTO withdrawals(user_id,amount_c,method,account,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, C(amt), method, account, 'pending', now)]); id = r[1].meta.last_row_id } catch (e) { return J({ error: errOf(e) }, 409) }
     await say(env, env.ADMIN_TG_ID, withdrawText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, account }), [[{ text: '💸 Mark paid', callback_data: 'wp:' + id }, { text: '↩️ Reject', callback_data: 'wr:' + id }]]);
