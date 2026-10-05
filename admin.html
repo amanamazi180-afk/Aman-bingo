@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aman Bingo Admin</title>
+<style>
+:root{--bg:#12141c;--card:#1b1e29;--line:#2c3040;--tx:#e9e6dc;--mut:#8d91a3;--gold:#f2b84b;--ok:#4fbf8a;--bad:#e0645c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,sans-serif;padding:12px;max-width:900px;margin:auto}
+h1{font-size:20px;margin:8px 0 12px}
+input,button{font:inherit;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--tx);padding:10px 12px}
+button{cursor:pointer}button:focus-visible,input:focus-visible{outline:2px solid var(--gold)}
+.pri{background:var(--gold);color:#1a1405;border-color:var(--gold);font-weight:600}
+.ok{background:var(--ok);color:#06180f;border-color:var(--ok)}
+.bad{background:var(--bad);color:#200806;border-color:var(--bad)}
+#login{display:flex;gap:8px;flex-wrap:wrap}#login input{flex:1;min-width:180px}
+nav{display:flex;gap:6px;overflow-x:auto;margin:10px 0}
+nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(--gold)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+.card b{display:block;font-size:22px;color:var(--gold)}.card span{color:var(--mut);font-size:13px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
+.row small{color:var(--mut);display:block}
+.row .acts{display:flex;gap:6px}
+#msg{margin:10px 0;padding:10px;border-radius:8px;display:none}
+#msg.err{display:block;background:#3a1b1a;border:1px solid var(--bad)}
+#msg.good{display:block;background:#12301f;border:1px solid var(--ok)}
+.empty{color:var(--mut);padding:16px 0}
+</style>
+</head>
+<body>
+<h1>Aman Bingo Admin</h1>
+<div id="login">
+  <input id="key" type="password" placeholder="Admin password" autocomplete="current-password">
+  <button class="pri" id="go">Sign in</button>
+</div>
+<div id="msg"></div>
+<div id="app" hidden>
+  <nav id="tabs"></nav>
+  <div id="view"></div>
+</div>
+
+<script>
+// Your Worker address. Change only if it moves.
+const API = "https://aman-bingo.amanamazi180.workers.dev";
+const TABS = ["Overview","Pending","Players","Rounds","Game"];
+let key = sessionStorage.getItem("ak") || "", tab = "Overview";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function say(t, kind){ const m=$("msg"); m.textContent=t; m.className=kind||""; if(!t) m.style.display="none"; else m.style.display="block"; }
+
+async function call(path, body){
+  const opt = { headers:{ "X-Admin-Key": key, "Content-Type":"application/json" } };
+  if(body){ opt.method="POST"; opt.body=JSON.stringify(body); }
+  let r;
+  try { r = await fetch(API + path, opt); }
+  catch(e){ throw new Error("Cannot reach " + API + path + ". The Worker is down, the address is wrong, or the Worker does not allow requests from this page (CORS)."); }
+  if(r.status===401||r.status===403) throw new Error("Wrong admin password.");
+  if(r.status===404) throw new Error("The Worker has no route " + path + ". Add this route to worker.js.");
+  if(!r.ok) throw new Error("Server error " + r.status + ": " + (await r.text()).slice(0,200));
+  return r.json();
+}
+
+function list(items, fn){ return items && items.length ? items.map(fn).join("") : '<div class="empty">Nothing here yet.</div>'; }
+
+const views = {
+  async Overview(){
+    const d = await call("/api/admin/overview");
+    const stats = [["Players",d.players],["Deposits (birr)",d.deposits],["Withdrawals (birr)",d.withdrawals],["Pending requests",d.pending],["Rounds played",d.rounds]];
+    return '<div class="grid">' + stats.map(([l,v])=>`<div class="card"><b>${esc(v ?? 0)}</b><span>${l}</span></div>`).join("") + "</div>";
+  },
+  async Pending(){
+    const d = await call("/api/admin/pending");
+    return list(d.items, p => `<div class="row"><div><b>${esc(p.type)} ${esc(p.amount)} birr</b><small>${esc(p.name)} · ${esc(p.phone)}</small></div>
+      <div class="acts"><button class="ok" data-a="approve" data-id="${esc(p.id)}">Approve</button><button class="bad" data-a="reject" data-id="${esc(p.id)}">Reject</button></div></div>`);
+  },
+  async Players(){
+    const d = await call("/api/admin/players");
+    return list(d.items, p => `<div class="row"><div><b>${esc(p.name)}</b><small>${esc(p.phone)}</small></div><b>${esc(p.balance)} birr</b></div>`);
+  },
+  async Rounds(){
+    const d = await call("/api/admin/rounds");
+    return list(d.items, r => `<div class="row"><div><b>Round ${esc(r.id)}</b><small>${esc(r.status)} · ${esc(r.players)} players</small></div><b>${esc(r.pot)} birr</b></div>`);
+  },
+  async Game(){
+    const d = await call("/api/admin/game");
+    return `<div class="card"><b>${esc(d.status || "unknown")}</b><span>Current game</span></div>
+      <div class="row"><div class="acts"><button class="ok" data-a="game-start">Start round</button><button class="bad" data-a="game-stop">Stop round</button></div></div>`;
+  }
+};
+
+async function show(){
+  $("tabs").innerHTML = TABS.map(t=>`<button class="${t===tab?'on':''}" data-t="${t}">${t}</button>`).join("");
+  $("view").innerHTML = '<div class="empty">Loading…</div>';
+  try { $("view").innerHTML = await views[tab](); say(""); }
+  catch(e){ $("view").innerHTML = ""; say(e.message, "err"); }
+}
+
+$("tabs").onclick = e => { const t=e.target.dataset.t; if(t){ tab=t; show(); } };
+$("view").onclick = async e => {
+  const a=e.target.dataset.a; if(!a) return;
+  try {
+    if(a==="approve"||a==="reject") await call("/api/admin/"+a, {id:e.target.dataset.id});
+    else await call("/api/admin/"+a);
+    say("Done.", "good"); setTimeout(show, 600);
+  } catch(err){ say(err.message, "err"); }
+};
+$("go").onclick = async () => {
+  key = $("key").value.trim(); if(!key) return say("Enter the admin password.", "err");
+  try { await call("/api/admin/overview"); sessionStorage.setItem("ak", key); $("login").hidden=true; $("app").hidden=false; show(); }
+  catch(e){ say(e.message, "err"); }
+};
+$("key").addEventListener("keydown", e => { if(e.key==="Enter") $("go").click(); });
+if(key){ $("key").value=key; $("go").click(); }
+</script>
+</body>
+</html>
