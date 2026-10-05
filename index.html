@@ -1,470 +1,191 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>AMAN BINGO</title>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>አማን BINGO</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@800;900&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#14161c;--bg2:#0b0c10;--cell:#2f3542;--cellb:#5b6477;--B:#3b82f6;--I:#6366f1;--N:#a855f7;--G:#10c98a;--O:#ff8a1f;--hit:#ff6a00;--red:#ef5350;--txt:#fff}
+:root{--bg:#12102a;--cd:#1e1b45;--ln:#3a3670;--or:#ffb300;--gr:#18d98b;--rd:#ff3d71}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;height:100dvh}
-body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:linear-gradient(#262a35,#14161c 40%,#0b0c10);color:var(--txt);overflow:hidden}
-.screen{display:none;height:100dvh;flex-direction:column;padding:10px 10px calc(env(safe-area-inset-bottom,0px) + 10px)}
-.screen.on{display:flex}
-.btn{border:1px solid #5b6477;background:#1a1d26;color:#fff;border-radius:14px;padding:12px 16px;font-weight:700;font-size:16px;display:flex;gap:8px;align-items:center;justify-content:center}
-.row{display:flex;gap:8px}
-.pill{flex:1;background:#1a1d26;border:1px solid #454c5e;border-radius:14px;padding:8px 4px;text-align:center}
-.pill small{display:block;font-size:11px;color:#b8b2e0;font-weight:700}
-.pill b{font-size:20px}
-.pill.timer b{color:#ffc400;font-size:26px}
-/* lobby */
-.pick{flex:1;min-height:0;margin:12px 0;background:#1d2029;border:1px solid #454c5e;border-radius:22px;padding:10px;overflow:auto}
-.picks{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}.picks .n{font-size:4.4vw;height:9.5vw;max-height:42px}
-.n{background:#2f3542;border:1.5px solid #5b6477;border-radius:10px;height:40px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:#fff}
-.n.mine{background:#2fbf71;border-color:#2fbf71}
-.n.taken{background:var(--hit);border-color:var(--hit);opacity:.85}
-.preview{display:none;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px;padding-bottom:4px}.pcard{min-width:0;background:#161921;border:1px solid #2b303d;border-radius:16px;padding:8px}.pcn{color:#ff9d00;font-weight:800;letter-spacing:.12em;font-size:3.1vw;text-align:center;margin-bottom:6px;white-space:nowrap}.preview .pcard .card{gap:3px;grid-template-columns:repeat(5,minmax(0,1fr))}.preview .pcard .card .h{height:6vw;font-size:3.4vw;border-radius:5px;min-width:0}.preview .pcard .card .c{height:8.4vw;aspect-ratio:auto;font-size:3.7vw;min-width:0;padding:0;overflow:hidden;border-radius:5px}
-.nav{display:flex;border-top:1px solid #363c4b;background:#08090c;margin:0 -10px -10px;padding:8px 0}
-.nav div{flex:1;text-align:center;font-size:12px;font-weight:700;color:#e8eaf0}
-.nav span{display:block;font-size:24px}
-/* card */
-.card{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
-.card .h{height:26px;border-radius:7px;color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:13px}
-.card .c{background:#fff;color:#1b1760;border-radius:7px;height:44px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px}
-.card .c.m{background:var(--G);color:#fff}
-.card .c.w{background:var(--hit);color:#fff}
-.hB{background:var(--B)}.hI{background:var(--I)}.hN{background:var(--N)}.hG{background:var(--G)}.hO{background:var(--O)}
-/* game */
-.top{display:flex;gap:6px;margin-bottom:8px}
-.top .pill b{font-size:4.2vw;white-space:nowrap}#gid{font-size:2.8vw!important}.top .pill{padding:6px 2px;min-width:0}.top .pill small{font-size:2.9vw}
-.game{flex:1;display:flex;gap:10px;min-height:0}
-.board{width:47%;background:#1d2029;border:1px solid #454c5e;border-radius:18px;padding:8px;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;grid-auto-rows:1fr}
-.board .hd{border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
-.board .n{height:auto;font-size:15px;border-radius:7px;background:#2f3542;border:1px solid #4d4c70}
-.board .n.called{background:var(--hit);border-color:var(--hit)}
-.board .n.last{background:var(--G);border-color:var(--G)}
-.side{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0;overflow:hidden}
-.box{background:#1d2029;border:1px solid #454c5e;border-radius:20px}
-.recent{display:flex;align-items:center;gap:6px;padding:8px;min-height:58px;overflow:hidden}
-.ball{width:9.5vw;height:9.5vw;max-width:46px;max-height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;color:#fff;flex:none}
-.big{height:17vh;min-height:92px;display:flex;align-items:center;justify-content:center}
-.big .ball{width:min(30vw,14vh);height:min(30vw,14vh);min-width:78px;min-height:78px;max-width:none;max-height:none;font-size:min(8vw,3.6vh);white-space:nowrap;border-width:5px;background:#fff!important;color:#4a1fd0;border:7px solid #f5c518}
-.auto{display:flex;align-items:center;justify-content:space-between;padding:1.4vh 14px;font-weight:800;letter-spacing:.08em;font-size:13px}
-.sw{width:50px;height:28px;border-radius:14px;background:#10c98a;position:relative}
-.sw:after{content:"";position:absolute;right:3px;top:3px;width:22px;height:22px;border-radius:50%;background:#fff}
-.sw.off{background:#555}.sw.off:after{right:auto;left:3px}
-.mycard{padding:8px 8px 0;overflow-y:auto;flex:1;min-height:0}.mycard .card{gap:4px;margin-bottom:2px}#mycard .h{height:auto;aspect-ratio:1.6/1;font-size:11px;border-radius:5px}#mycard .c{height:auto;aspect-ratio:1/1;font-size:4.3vw;border-radius:5px}.cartela{text-align:center;font-weight:800;letter-spacing:.08em;font-size:14px;padding-bottom:8px}
-.watch{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:12px;gap:12px}
-.watch h2{font-size:7vw;line-height:1.1}
-.watch p{color:#a9afbd;font-size:15px}
-.bar{display:flex;gap:8px;margin-top:8px}
-.bar .btn{flex:1}
-.red{background:var(--red);border-color:var(--red)}
-.dis{opacity:.5}
-/* winner */
-.ov{position:fixed;inset:0;background:#06041a;display:none;align-items:center;justify-content:center;padding:20px;z-index:9}
+html,body{height:100%}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:#fff;overflow:hidden}
+.s{display:none;position:fixed;inset:0;flex-direction:column;gap:10px;padding:12px 12px calc(env(safe-area-inset-bottom,0px) + 12px);overflow-y:auto}
+.s.on{display:flex}
+.logo{font-family:'Noto Sans Ethiopic','Abyssinica SIL',sans-serif;font-size:14vw;font-weight:900;line-height:1.05;background:linear-gradient(90deg,#ffd23f,#ff9f1c,#ff3d8b);-webkit-background-clip:text;color:transparent;white-space:nowrap;text-align:center}
+.logo i{font-family:system-ui,-apple-system,sans-serif;font-style:normal;background:linear-gradient(90deg,#22d3ee,#a78bfa,#2ee59d);-webkit-background-clip:text;color:transparent}
+.bar{width:60vw;height:8px;border-radius:8px;background:#2b2860;overflow:hidden;margin:14px auto 0}
+.bar div{height:100%;width:0;background:linear-gradient(90deg,#ff3d8b,#ffd23f,#2ee59d);animation:ld 1.3s ease-in-out forwards}
+@keyframes ld{to{width:100%}}
+.gb{border:1px solid var(--ln);background:var(--cd);color:#fff;border-radius:14px;padding:11px 14px;font-weight:700;font-size:15px}
+.red{background:var(--rd);border-color:var(--rd);color:#fff}
+.row{display:flex;gap:8px;align-items:stretch}
+.pill{flex:1;background:var(--cd);border:1px solid var(--ln);border-radius:14px;padding:6px 4px;text-align:center}
+.pill small{display:block;font-size:10px;color:#a9afd0;font-weight:700}.pill b{font-size:19px}.t b{color:#ffd23f;font-size:24px}
+.hdr{display:flex;justify-content:space-between;align-items:center}.hdr b{font-family:'Noto Sans Ethiopic','Abyssinica SIL',sans-serif;font-size:24px;font-weight:900;color:#ffd23f}
+.mid{flex:1;display:flex;flex-direction:column;justify-content:center;gap:10px;text-align:center;color:#b8bdd8}
+.bot{display:flex;gap:12px;align-items:center;background:var(--cd);border:1px solid var(--ln);border-radius:26px;padding:14px}
+.wal small{display:block;font-size:11px;letter-spacing:.15em;color:#a9afd0;font-weight:700}.wal b{font-size:34px}
+.play{flex:1;border:0;border-radius:20px;background:var(--gr);color:#08301f;font-size:24px;font-weight:900;padding:18px 8px;box-shadow:0 8px 24px #18d98b66}
+.ov{position:fixed;inset:0;background:#12102af5;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:9;padding:20px;text-align:center}
 .ov.on{display:flex}
-.win{width:100%;max-width:420px;background:#0f0d24;border:1px solid #2a2750;border-radius:40px;padding:26px 18px;text-align:center}
-.win .crown{font-size:56px}
-.win h1{font-size:44px;background:linear-gradient(#ffd09a,#ff7a1a);-webkit-background-clip:text;color:transparent}
-.win .who{letter-spacing:.12em;margin:8px 0 22px;font-size:20px}
-.win .cn{color:#ff9d00;letter-spacing:.2em;font-weight:800;font-size:14px;margin-bottom:12px}
-.win .card{background:#2f3542;padding:12px;border-radius:20px}
-.win .st{margin-top:18px;color:#9aa1b3;font-size:13px;letter-spacing:.15em;font-weight:700}
-
-.screen{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 62px)}
-#home,#tab,#lobby{overflow-y:auto}
-#game.screen{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 10px)}
-.gnav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#08090c;border-top:1px solid #363c4b;padding:6px 0 calc(env(safe-area-inset-bottom,0px) + 4px);z-index:5}
-.gnav div{flex:1;text-align:center;font-size:11px;font-weight:800;color:#e8eaf0;position:relative}
-.gnav div span{display:block;font-size:20px}
-.gnav div.on{color:#10c98a}
-.gnav div.on:before{content:"";position:absolute;top:-7px;left:30%;right:30%;height:3px;border-radius:3px;background:#10c98a}
-#home{background:radial-gradient(circle at 80% 90%,#2a2e3a,transparent 55%),#050608}
-.hd1{display:flex;justify-content:space-between;align-items:center;margin-top:1.5vh;padding:0 6px}
-.hd1 b{font-size:6.5vw;letter-spacing:-.5px}
-.rules{background:#161921;border:1px solid #2f2d4a;border-radius:24px;padding:1.2vh 5vw;font-weight:700;color:#fff;font-size:15px}
-.wel{text-align:center;margin-top:5vh;color:#cfcbe6;font-size:5vw}
-.logo{text-align:center;font-size:13vw;font-weight:900;letter-spacing:-1px;line-height:1;margin:.5vh 0 4.5vh;white-space:nowrap;background:linear-gradient(#ffd23a,#ff9d00);-webkit-background-clip:text;color:transparent}
-.hcard{margin:0 2vw;background:#161921;border:1px solid #2b303d;border-radius:9vw;padding:3.5vh 5vw 4vh;text-align:center}
-.hcard .ct{letter-spacing:.35em;font-weight:800;font-size:13px}
-.hcard .ln{width:22vw;height:2px;background:#e8a317;margin:2vh auto 3vh;border-radius:2px}
-.play{width:100%;border:0;border-radius:9vw;background:#00c27a;color:#0b1a55;font-size:8.6vw;font-weight:900;padding:1.8vh;box-shadow:0 12px 40px #00c27a55}
-.hcard .wl{margin-top:3vh;letter-spacing:.3em;color:#a9a6c4;font-weight:700;font-size:14px}
-.hcard .wv{font-size:11vw;font-weight:900;margin-top:.5vh}
-.tabpg{padding:16px 6px}
-.tabpg h2{margin-bottom:14px}
-.li{background:#1d2029;border:1px solid #454c5e;border-radius:14px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;font-weight:700}
-.rulesbox{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;z-index:10;padding:24px}
-.rulesbox.on{display:flex}
-.rulesbox div{background:#161921;border-radius:24px;padding:22px;max-width:380px;line-height:1.5;font-size:15px}
-.inp{width:100%;padding:13px;border-radius:12px;border:1px solid #454c5e;background:#161921;color:#fff;font-size:16px;margin-top:8px}
-.mth{display:flex;align-items:center;gap:12px;background:#1d2029;border:1px solid #454c5e;border-radius:16px;padding:16px;margin-bottom:10px;font-weight:800;font-size:18px}
-.mth small{display:block;color:#a9afbd;font-weight:600;font-size:12px}
-.acc{background:#161921;border:1px dashed #e8a317;border-radius:14px;padding:12px;margin:10px 0;text-align:center}
-.acc b{font-size:22px;letter-spacing:.05em;display:block;margin:4px 0}
-.stt{color:#ffc400;font-weight:800}
-.toast{position:fixed;left:50%;top:14%;transform:translateX(-50%);background:#ef5350;color:#fff;font-weight:800;padding:12px 22px;border-radius:14px;z-index:20;display:none;box-shadow:0 8px 30px #0008;font-size:16px;max-width:90vw;text-align:center}
-.myrank{display:flex;align-items:center;gap:14px;background:linear-gradient(90deg,#f5a623,#c77800);border-radius:9vw;padding:4vw 5vw;margin:2vh 0 2.5vh;border:1px solid #ffc247}
-.myrank .rk{background:#ffffff26;border-radius:5vw;padding:4.5vw 3vw;font-size:7vw;font-weight:900;font-style:italic;min-width:20vw;text-align:center}
-.myrank .mid{flex:1;min-width:0}.myrank .mid small{display:block;letter-spacing:.15em;font-weight:800;color:#e8eaf0;font-size:3.4vw}
-.myrank .mid b{font-size:6.5vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
-.myrank .pl{text-align:right}.myrank .pl b{font-size:9vw;display:block;line-height:1}.myrank .pl small{font-weight:800;color:#e8eaf0;font-size:3.6vw}
-.seg{display:flex;background:#0e0d22;border:1px solid #1f222c;border-radius:7vw;padding:1.6vw}
-.seg div{flex:1;text-align:center;padding:3.2vw 0;border-radius:6vw;font-weight:800;font-size:4.4vw;color:#7c8499}
-.seg div.on{background:#2a2c3e;color:#fff}
-.top10{letter-spacing:.15em;font-weight:800;color:#9aa1b3;font-size:4vw;margin:3vh 1vw 1.5vh;display:flex;align-items:center;gap:3vw}
-.top10:after{content:"";flex:1;height:1px;background:#1f222c}
-.prow{display:flex;align-items:center;gap:4vw;background:#161921;border:1px solid #1f222c;border-radius:7vw;padding:3.6vw 4vw;margin-bottom:2.4vw}
-.prow .bd{width:13vw;height:13vw;border-radius:4vw;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:4.6vw;background:#1e1d36;color:#7c8499;flex:none}
-.prow .bd.r1{background:#ffc107;color:#2b1a00}.prow .bd.r2{background:#cfd8e3;color:#23304a}.prow .bd.r3{background:#ff8a00;color:#3a1a00}
-.prow .nm{flex:1;min-width:0;font-weight:800;font-size:5.2vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.prow .gm{text-align:right}.prow .gm b{display:block;font-size:5.2vw}.prow .gm small{color:#7c8499;font-weight:700;font-size:3.6vw}
-</style>
-</head>
-<body>
-
+.hint{font-size:13px;color:#a9afd0;text-align:center}
+.grid{flex:1;min-height:140px;overflow-y:auto;display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;align-content:start;background:#171538;border:1px solid var(--ln);border-radius:18px;padding:8px}
+.n{background:#2a2760;border:1.5px solid #4a4590;border-radius:9px;height:38px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px}
+.n.mine{background:#18d98b;border-color:#18d98b;color:#08301f}.n.tk{background:#ff7a1a;border-color:#ff7a1a;color:#fff;opacity:.85}
+.prev{display:grid;grid-template-columns:1fr 1fr;gap:8px}.prev:empty{display:none}
+.card{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.card .h{border-radius:6px;font-weight:800;text-align:center;padding:3px 0;font-size:13px}
+.card .c{background:#fff;color:#1b1760;border-radius:6px;aspect-ratio:1.15;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px}
+.card .c.m{background:var(--gr);color:#08301f}.card .c.l{outline:3px solid #ffd23f;transform:scale(1.06)}.card .c.w{background:#ff7a1a;color:#fff}
+.prev .card .c{font-size:13px;aspect-ratio:1.4}.prev .card .h{font-size:10px}.cn{text-align:center;color:var(--or);font-weight:800;letter-spacing:.1em;font-size:12px;margin-bottom:4px}
+.callbox{background:var(--cd);border:1px solid var(--ln);border-radius:22px;padding:12px;text-align:center}
+.big{display:inline-flex;align-items:center;justify-content:center;min-width:34vw;height:34vw;max-height:170px;border-radius:50%;font-size:11vw;font-weight:900;color:#fff;border:6px solid #ffd23f;padding:0 14px}
+.rec{display:flex;gap:6px;justify-content:center;margin-top:10px}.rec span{width:11vw;height:11vw;max-width:48px;max-height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
+.mc{background:var(--cd);border:1px solid var(--ln);border-radius:18px;padding:10px}
+.watch{background:var(--cd);border:1px dashed var(--ln);border-radius:18px;padding:18px;text-align:center;color:#b8bdd8}
+.bd{display:flex;flex-direction:column;gap:3px}.bd div{display:flex;gap:2px}.bd b{width:16px;font-size:11px;color:#fff;text-align:center;border-radius:3px}.bd span{flex:1;font-size:9px;text-align:center;padding:4px 0;border-radius:3px;background:#2a2760;color:#a9afd0}.bd span.k{background:#ff7a1a;color:#fff}
+.inp{width:100%;padding:13px;border-radius:12px;border:1px solid var(--ln);background:var(--cd);color:#fff;font-size:16px}
+.li{display:flex;justify-content:space-between;background:var(--cd);border:1px solid var(--ln);border-radius:12px;padding:10px 12px;font-weight:700;font-size:14px}
+.acc{border:1px dashed var(--or);border-radius:12px;padding:10px;text-align:center}.acc b{font-size:22px;display:block}
+.mth{display:flex;align-items:center;gap:12px;background:var(--cd);border:2px solid var(--ln);border-radius:16px;padding:12px 14px}.mth b{font-size:17px;color:var(--or)}.mth span{font-size:22px;font-weight:800;letter-spacing:.04em}.mth small{color:#a9afd0;font-weight:700}.mth img{width:54px;height:54px;border-radius:14px;object-fit:cover;flex:none;background:#fff}.mth div{display:flex;flex-direction:column;gap:2px;min-width:0}.mth.on{border-color:var(--gr);background:#16314a}
+.toast{position:fixed;left:50%;top:12%;transform:translateX(-50%);background:var(--rd);color:#fff;font-weight:800;padding:12px 20px;border-radius:14px;z-index:20;display:none;max-width:90vw;text-align:center}
+</style></head><body>
 <div class="toast" id="toast"></div>
-<!-- HOME -->
-<div id="home" class="screen on">
-  <div class="hd1"><b>AMAN BINGO</b><button class="rules" onclick="$('rb').classList.add('on')">Rules</button></div>
-  <div class="wel">Welcome to</div>
-  <div class="logo">AMAN BINGO</div>
-  <div class="hcard">
-    <div class="ct">CHOOSE YOUR STAKE</div><div class="ln"></div>
-    <button class="play" onclick="goLobby()">▶ PLAY <span id="hs">10</span></button>
-    <div class="wl">WALLET BALANCE</div><div class="wv" id="hw">15</div>
-  </div>
-</div>
-<div id="tab" class="screen"><div class="tabpg" id="tabc"></div></div>
-<div class="rulesbox" id="rb" onclick="this.classList.remove('on')"><div><b>Rules</b><br>1. Pick up to 2 cards (1–400) before the timer ends.<br>2. Stake is taken from your play wallet.<br>3. Numbers are called automatically.<br>4. First card to complete a row, column or diagonal wins the Derash.<br>(Tap to close)</div></div>
-<div class="gnav" id="gnav"><div class="on" onclick="tabTo('home',this)"><span>🎮</span>GAME</div><div onclick="tabTo('scores',this)"><span>🏆</span>SCORES</div><div onclick="tabTo('history',this)"><span>🕓</span>HISTORY</div><div onclick="tabTo('wallet',this)"><span>💼</span>WALLET</div><div onclick="tabTo('profile',this)"><span>👤</span>PROFILE</div></div>
 
-<!-- LOBBY -->
-<div id="lobby" class="screen">
-  <div class="row">
-    <button class="btn" style="flex:none" onclick="backHome()">← Back</button>
-    <div style="flex:1"></div>
-    <button class="btn" style="flex:none" onclick="refreshLobby()">⟳ Refresh</button>
-  </div>
-  <div class="row" style="margin-top:12px">
-    <div class="pill"><small>MAIN WALLET</small><b id="mw">0</b></div>
-    <div class="pill"><small>PLAY WALLET</small><b id="pw">15</b></div>
-    <div class="pill"><small>STAKE</small><b id="stake">10</b></div>
-    <div class="pill timer"><b id="lt">40 s</b></div>
-  </div>
-  <div class="pick"><div class="picks" id="picks"></div><div class="preview" id="prev"></div></div>
+<div class="s" id="splash" style="justify-content:center"><div class="logo">አማን <i>BINGO</i></div><div class="bar"><div></div></div><p class="hint" id="smsg" style="margin-top:10px"></p></div>
+
+<div class="s on" id="home">
+  <div class="hdr"><b>አማን BINGO</b><button class="gb" onclick="alert('1. Pick up to 2 cards (1-400) before the timer ends.\n2. Stake is taken from your wallet.\n3. Numbers are called automatically.\n4. First card to complete a row, column or diagonal wins the Derash.')">Rules</button></div>
+  <div class="mid"><div class="logo">አማን <i>BINGO</i></div><div class="bar" style="margin:0 auto"><div></div></div><p>Stake <b id="hs">10</b> birr · pick up to 2 cards</p><p id="hreg" style="color:#ffd23f;font-weight:700"></p></div>
+  <button class="gb" onclick="openWallet()">💼 Wallet · Deposit / Withdraw</button>
+  <div class="bot"><div class="wal"><small>WALLET BALANCE</small><b id="hw">…</b></div><button class="play" id="pb" onclick="play()">▶ PLAY</button></div>
 </div>
 
-<!-- GAME -->
-<div id="game" class="screen">
-  <div class="top">
-    <div class="pill"><small>Game ID</small><b id="gid">-</b></div>
-    <div class="pill"><small>Players</small><b id="pl">0</b></div>
-    <div class="pill"><small>Bet</small><b id="bet">10</b></div>
-    <div class="pill"><small>Derash</small><b id="der">0</b></div>
-    <div class="pill"><small>Called</small><b id="cl">0</b></div>
-  </div>
-  <div class="game">
-    <div class="board" id="board"></div>
-    <div class="side">
-      <div class="box recent" id="recent"></div>
-      <div class="box big" id="big"></div>
-      <div class="box auto">AUTOMATIC <div class="sw" id="sw"></div></div>
-      <div class="box" style="display:flex;flex-direction:column;min-height:0;flex:1">
-        <div class="mycard" id="mycard"></div>
-        <div class="watch" id="watch" style="flex:1"><h2>WATCHING<br>ONLY</h2><p>The next round starts soon. Wait here.</p></div>
-      </div>
-    </div>
-  </div>
-  <div class="bar">
-    <button class="btn red" onclick="leave()">LEAVE</button>
-    <button class="btn" onclick="refresh()">REFRESH</button>
-    <button class="btn" id="act" onclick="claim()" style="background:#00c27a;border-color:#00c27a;color:#0b1a55">AUTOMATIC</button>
-  </div>
+<div class="s" id="lobby">
+  <div class="row"><button class="gb" onclick="backHome()">←</button><div class="pill"><small>BALANCE</small><b id="lb">0</b></div><div class="pill"><small>STAKE</small><b id="ls">10</b></div><div class="pill t"><small>STARTS IN</small><b id="lt">-</b></div></div>
+  <p class="hint">Tap numbers to pick your cartela (max 2). <span style="color:#18d98b">Green</span> = yours · <span style="color:#ff7a1a">orange</span> = taken</p>
+  <div class="grid" id="grid"></div>
+  <div class="prev" id="prev"></div>
 </div>
 
-<!-- WINNER -->
-<div class="ov" id="ov">
-  <div class="win">
-    <div class="crown">👑</div>
-    <h1>🎉 BINGO! 🎉</h1>
-    <div class="who" id="wname"></div>
-    <div class="cn" id="wcn"></div>
-    <div class="card" id="wcard"></div>
-    <div class="st" id="wst"></div>
-  </div>
+<div class="s" id="game">
+  <div class="row"><div class="pill"><small>PLAYERS</small><b id="gp">0</b></div><div class="pill"><small>DERASH</small><b id="gd">0</b></div><div class="pill"><small>CALLED</small><b id="gc">0/75</b></div><button class="gb" id="sb" onclick="snd()">🔊</button></div>
+  <div class="callbox"><div class="hint" style="margin-bottom:8px">CURRENT NUMBER</div><div class="big" id="big" style="background:#2f2b66">—</div><div class="rec" id="rec"></div></div>
+  <div id="mycards" style="display:flex;flex-direction:column;gap:10px"></div>
+  <button class="gb" onclick="tb()">All 75 numbers ▾</button><div class="bd" id="bd" style="display:none"></div>
+  <button class="gb red" onclick="leaveGame()">Leave</button>
 </div>
+
+<div class="s" id="wal">
+  <div class="row"><button class="gb" onclick="goHome()">← Back</button></div>
+  <div class="li"><span>Withdrawable</span><span id="wb">0</span></div>
+  <div class="li"><span>Bonus (play only)</span><span id="wbn">0</span></div>
+  <div class="row"><button class="gb" style="flex:1;background:var(--gr);color:#08301f" onclick="wf('d')">Deposit</button><button class="gb" style="flex:1" onclick="wf('w')">Withdraw</button></div>
+  <div id="wform" style="display:flex;flex-direction:column;gap:10px"></div>
+  <div id="whist" style="display:flex;flex-direction:column;gap:6px"></div>
+</div>
+
+<div class="ov" id="win"><div style="font-size:54px">👑</div><h1 id="wt" style="font-size:36px;color:#ffd23f"></h1><p id="wn" style="margin:8px 0 14px;font-size:18px"></p><div id="wc" style="width:100%;max-width:340px"></div><p class="hint" id="ws" style="margin-top:14px"></p></div>
+<div class="ov" id="ld"><div class="logo">አማን <i>BINGO</i></div><div class="bar"><div></div></div></div>
 
 <script>
-const tg=window.Telegram&&Telegram.WebApp; if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#1f2937");tg.setBackgroundColor("#14161c")}catch(e){}}
-const user=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user)||{first_name:"Player"};
-const L="BINGO",COL=["B","I","N","G","O"],CL=["#3b82f6","#6366f1","#a855f7","#10c98a","#ff8a1f"];
-const DEPOSIT_ACCOUNTS={telebirr:{label:'Telebirr',icon:'📱',number:'0958828304',name:'AMANUEL'},boa:{label:'Bank of Abyssinia (BOA)',icon:'🏦',number:'266199511',name:'AMANUEL YISMAH'}};
-const MIN_DEP=30,MIN_WD=50;
-const WITHDRAW_METHODS={telebirr:{label:'Telebirr',icon:'📱'},cbe:{label:'CBE',icon:'🏦'},boa:{label:'Bank of Abyssinia (BOA)',icon:'🏦'},oromia:{label:'Oromia Bank',icon:'🏦'},dashen:{label:'Dashen Bank',icon:'🏦'}};
-/* Voice files: sounds/1.m4a ... sounds/75.m4a (number 1-75 = B1 ... O75) */
-const VOICE_DIR='';
-const STAKE=10,MAXC=2,TOTAL=400,LOBBY_SECS=40,CALL_MS=4000;
-let wallet={main:0,play:15};
-let st={cards:[],taken:{},called:[],auto:true,playing:false,over:false,timer:null,lobbyT:null};
-const $=id=>document.getElementById(id);
-const show=id=>{document.querySelectorAll(".screen").forEach(s=>s.classList.remove("on"));$(id).classList.add("on")};
-const letter=n=>COL[Math.floor((n-1)/15)];
+const API="https://aman-bingo.amanamazi180.workers.dev"; // e.g. https://aman-bingo.yourname.workers.dev  (no slash at the end)
+const tg=window.Telegram&&Telegram.WebApp;if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#12102a");tg.setBackgroundColor("#12102a")}catch(e){}}
+const $=i=>document.getElementById(i),CL=["#22a7ff","#a855f7","#ff3d8b","#18d98b","#ff9f1c"];
+const L=n=>"BINGO"[Math.floor((n-1)/15)],F=n=>String(+Number(n).toFixed(2));
+const PAY={telebirr:{n:"Telebirr",a:"0958828304",h:"AMANUEL"},boa:{n:"BOA",a:"266199511",h:"AMANUEL YISMAH"},dashen:{n:"Dashen Bank",a:"5901914597011",h:"AMANUEL YISMAH"}};
+const IMG={"boa": "data:image/jpeg;base64,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", "dashen": "data:image/jpeg;base64,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", "cbe": "data:image/jpeg;base64,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", "telebirr": "data:image/jpeg;base64,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"};
+const ERR={no_api:"Server address is not set in index.html (API line)",not_registered:"Please register in the bot first (share your contact)",insufficient_balance:"Not enough balance - deposit first",round_closed:"Round already started",max_cards:"You can take only 2 cards",taken:"Card already taken",bad_input:"Check the numbers you entered",txid_used:"This transaction ID was already used",deposit_required:"Make a deposit before withdrawing",withdraw_pending:"You already have a pending withdrawal. Wait until it is approved.",unauthorized:"Open this game from the Telegram bot",server_error:"Server error, try again"};
+let ready=false,S=null,off=0,inGame=false,looping=false,snd_on=true,lastN=0,rid=0,key="",reg=false;
+function show(id){document.querySelectorAll(".s").forEach(e=>e.classList.remove("on"));$(id).classList.add("on")}
+let _t;function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(_t);_t=setTimeout(()=>t.style.display="none",2600)}
+async function api(p,b){if(API.indexOf("PASTE_")===0)throw"no_api";const r=await fetch(API+p,{method:b?"POST":"GET",headers:{"content-type":"application/json","x-init-data":tg?tg.initData:""},body:b?JSON.stringify(b):undefined});const d=await r.json().catch(()=>({}));if(!r.ok)throw d.error||"server_error";return d}
 
-/* seeded card: card number -> same card every time */
-function rng(s){return()=>{s=(s*1664525+1013904223)%4294967296;return s/4294967296}}
-function makeCard(no){
-  const r=rng(no*7919+13),cols=[];
-  for(let c=0;c<5;c++){const pool=Array.from({length:15},(_,i)=>c*15+i+1),out=[];
-    for(let i=0;i<5;i++)out.push(pool.splice(Math.floor(r()*pool.length),1)[0]);cols.push(out)}
-  cols[2][2]=0; // free
-  return cols; // cols[c][row]
-}
-function drawCard(el,card,marked,winCells){
-  let h="";COL.forEach((c,i)=>h+=`<div class="h h${c}">${c}</div>`);
-  for(let r=0;r<5;r++)for(let c=0;c<5;c++){const v=card[c][r];
-    const isM=v===0||marked.includes(v),isW=winCells&&winCells.some(x=>x[0]===c&&x[1]===r);
-    h+=`<div class="c ${isW?"w":isM?"m":""}">${v===0?"★":v}</div>`}
-  el.innerHTML=h;
-}
+/* card helpers (same generator as the server) */
+function mk(no){let s=no*7919+13;const r=()=>(s=(s*1664525+1013904223)%4294967296)/4294967296,cols=[];for(let c=0;c<5;c++){const p=Array.from({length:15},(_,i)=>c*15+i+1),o=[];for(let i=0;i<5;i++)o.push(p.splice(Math.floor(r()*p.length),1)[0]);cols.push(o)}cols[2][2]=0;return cols}
+function winLine(c,cl){const m=(a,b)=>c[a][b]===0||cl.includes(c[a][b]),ls=[];for(let i=0;i<5;i++){ls.push([0,1,2,3,4].map(j=>[j,i]));ls.push([0,1,2,3,4].map(j=>[i,j]))}ls.push([0,1,2,3,4].map(j=>[j,j]));ls.push([0,1,2,3,4].map(j=>[j,4-j]));return ls.find(l=>l.every(([a,b])=>m(a,b)))||null}
+function cardHTML(no,cl,hl,last){const c=mk(no);let h='<div class="card">'+[..."BINGO"].map((l,i)=>`<div class="h" style="background:${CL[i]}">${l}</div>`).join("");for(let r=0;r<5;r++)for(let k=0;k<5;k++){const v=c[k][r],m=v===0||cl.includes(v),w=hl&&hl.some(x=>x[0]===k&&x[1]===r);h+=`<div class="c${w?" w":m?" m":""}${v&&v===last?" l":""}">${v===0?"★":v}</div>`}return h+"</div>"}
 
-/* LOBBY */
-function genTaken(){st.taken={}}   // real taken cartelas will come from the server
-function renderPicks(){
-  let h="";
-  for(let i=1;i<=TOTAL;i++)h+=`<div class="n${st.cards.includes(i)?" mine":st.taken[i]?" taken":""}" onclick="pick(${i})">${i}</div>`;
-  $("picks").innerHTML=h;
-  const p=$("prev");
-  if(!st.cards.length){p.style.display="none";return}
-  p.style.display="grid";
-  p.innerHTML=st.cards.map((c,k)=>`<div class="pcard"><div class="pcn">CARTEL NO #${c}</div><div class="card" id="pv${k}"></div></div>`).join("");
-  st.cards.forEach((c,k)=>drawCard($("pv"+k),makeCard(c),[]));
-}
-function buildLobby(){
-  genTaken();renderPicks();
-  let t=LOBBY_SECS;$("lt").textContent=t+" s";
-  clearInterval(st.lobbyT);
-  st.lobbyT=setInterval(()=>{t--;$("lt").textContent=t+" s";if(t<=0){clearInterval(st.lobbyT);startGame()}},1000);
-}
-function pick(i){
-  if(st.taken[i])return;
-  const k=st.cards.indexOf(i);
-  if(k>=0){st.cards.splice(k,1);wallet.play+=STAKE}
-  else{
-    if(st.cards.length>=MAXC){toast("You can take only "+MAXC+" cards");return}
-    if(wallet.play<STAKE){toast("Deposit first to take a cartela - you can still watch");return}
-    st.cards.push(i);wallet.play-=STAKE}
-  $("pw").textContent=wallet.play;
-  renderPicks();
-  if(tg&&tg.HapticFeedback)tg.HapticFeedback.selectionChanged();
-}
+/* voice */
+const _a={};let _cur=null;
+function playNum(n){if(!snd_on)return;try{if(_cur)_cur.pause();const a=_a[n]||(_a[n]=new Audio(n+".m4a"));a.currentTime=0;_cur=a;const p=a.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}}
+function snd(){snd_on=!snd_on;$("sb").textContent=snd_on?"🔊":"🔇"}
 
-/* GAME */
-function buildBoard(){
-  let h="";COL.forEach((c,i)=>h+=`<div class="hd" style="background:${CL[i]};height:32px">${c}</div>`);
-  for(let r=1;r<=15;r++)for(let c=0;c<5;c++){const n=c*15+r;h+=`<div class="n" id="b${n}">${n}</div>`}
-  $("board").innerHTML=h;
+/* flow */
+async function boot(){
+  if(API.indexOf("PASTE_")===0){$("hreg").textContent="Setup needed: put your Worker URL in index.html (API line).";return}
+  const t0=Date.now();
+  try{const [me,st]=await Promise.all([api("/api/me"),api("/api/state")]);reg=me.registered;S=st;off=st.now-Date.now();
+    ready=true;goHome(me)}
+  catch(e){$("hreg").textContent=ERR[e]||"Could not connect. Check your internet and reopen."}
 }
-function startGame(){
-  $("gnav").style.display="none";
-  st.over=false;st.called=[];st.playing=st.cards.length>0;
-  const players=st.cards.length;   // only real players (no simulated ones)
-  $("gid").textContent=Math.random().toString(36).slice(2,11).toUpperCase();
-  $("pl").textContent=players;$("bet").textContent=STAKE;
-  $("der").textContent=Math.floor(players*STAKE*0.8);$("cl").textContent=0;
-  $("recent").innerHTML="";$("big").innerHTML="";
-  buildBoard();show("game");
-  $("mycard").style.display=st.playing?"block":"none";
-  $("watch").style.display=st.playing?"none":"flex";
-  setAct();
-  if(st.playing)renderMine();
-  const pool=Array.from({length:75},(_,i)=>i+1).sort(()=>Math.random()-.5);
-  clearInterval(st.timer);
-  st.timer=setInterval(()=>{
-    if(st.over)return;
-    const n=pool.shift();if(!n){endGame("Nobody");return}
-    call(n);
-  },CALL_MS);
+async function goHome(me){
+  inGame=false;show("home");
+  try{me=me||await api("/api/me");reg=me.registered;$("hw").textContent=F(me.balance+me.bonus)}catch(e){}
+  $("hreg").textContent=reg?"":"Register first: open the bot and share your contact";$("pb").style.opacity=reg?1:.5;
+  if(S)$("hs").textContent=S.round.stake;
 }
-function call(n){
-  st.called.push(n);
-  document.querySelectorAll(".board .n.last").forEach(e=>e.classList.remove("last"));
-  const b=$("b"+n);b.classList.add("called","last");
-  $("cl").textContent=st.called.length;
-  const col=CL[Math.floor((n-1)/15)];
-  const ball=(n,s)=>`<div class="ball" style="background:${CL[Math.floor((n-1)/15)]}">${letter(n)}-${n}</div>`;
-  $("recent").innerHTML=st.called.slice(-4).map(x=>ball(x)).join("");
-  $("big").innerHTML=`<div class="ball">${letter(n)}-${n}</div>`;
-  if(st.auto)playNum(n);
-  if(st.playing){renderMine();if(st.auto){for(const c of st.cards){const w=check(makeCard(c));if(w){endGame(user.first_name,c,w);break}}}}
+function play(){
+  if(ready&&!reg){toast(ERR.not_registered);return}
+  inGame=true;key="";lastN=0;rid=0;if(S)render();if(!looping)loop();else tick();
 }
-function renderMine(){const m=$("mycard");m.innerHTML=st.cards.map((c,k)=>`<div class="card" id="mc${k}"></div><div class="cartela">CARTELA # ${c}</div>`).join("");st.cards.forEach((c,k)=>drawCard($("mc"+k),makeCard(c),st.called))}
-function setAct(){const a=$("act");if(!st.playing){a.textContent="WATCHING";a.classList.add("dis");a.style.background="";a.style.color="";return}a.classList.remove("dis");a.textContent=st.auto?"AUTOMATIC":"BINGO";a.style.background=st.auto?"#00c27a":"#1a1d26";a.style.borderColor=st.auto?"#00c27a":"#5b6477";a.style.color=st.auto?"#0b1a55":"#fff"}
-function check(card,force){
-  const m=(c,r)=>card[c][r]===0||st.called.includes(card[c][r]);
-  const lines=[];
-  for(let i=0;i<5;i++){lines.push([0,1,2,3,4].map(j=>[j,i]));lines.push([0,1,2,3,4].map(j=>[i,j]))}
-  lines.push([0,1,2,3,4].map(j=>[j,j]));lines.push([0,1,2,3,4].map(j=>[j,4-j]));
-  const w=lines.find(l=>l.every(([c,r])=>m(c,r)));
-  if(w)return w;
-  if(force){return lines[0]}
-  return null;
+async function loop(){looping=true;while(inGame){await tick();await new Promise(r=>setTimeout(r,1000))}looping=false}
+async function tick(){try{S=await api("/api/state");off=S.now-Date.now();if(inGame)render()}catch(e){if(e==="not_registered"||e==="unauthorized"){inGame=false;toast(ERR[e]);goHome()}}}
+function render(){
+  const r=S.round;
+  if(r.id!==rid){rid=r.id;lastN=S.called.length;key=""}
+  if(r.status==="lobby"){$("win").classList.remove("on");show("lobby");drawLobby()}
+  else{show("game");drawGame()}
 }
-function claim(){
-  if(!st.playing||st.over||st.auto)return;
-  for(const c of st.cards){const w=check(makeCard(c));if(w){endGame(user.first_name,c,w);return}}
-  alert("No bingo yet");
+function drawLobby(){
+  const r=S.round,left=Math.max(0,Math.ceil((r.start_ts+r.lobby_ms-(Date.now()+off))/1000));
+  $("lt").textContent=left+"s";$("lb").textContent=F(S.balance+S.bonus);$("ls").textContent=r.stake;
+  const k=JSON.stringify([S.taken,S.mine]);if(k===key)return;key=k;
+  let h="";for(let i=1;i<=400;i++)h+=`<div class="n${S.mine.includes(i)?" mine":S.taken.includes(i)?" tk":""}" onclick="pick(${i})">${i}</div>`;
+  const g=$("grid"),sc=g.scrollTop;g.innerHTML=h;g.scrollTop=sc;
+  $("prev").innerHTML=S.mine.map(n=>`<div><div class="cn">CARTELA #${n}</div>${cardHTML(n,[])}</div>`).join("");
 }
-function endGame(name,cardNo,line){
-  st.over=true;clearInterval(st.timer);
-  const won=st.playing&&st.cards.includes(cardNo);
-  if(st.playing)recordGame();
-  if(st.playing)hist.unshift(["Card #"+st.cards.join(" + #")+" · "+name+" won",won?"+"+$("der").textContent:"-"+STAKE*st.cards.length]);
-  if(won)wallet.main+=Number($("der").textContent);
-  const card=cardNo?makeCard(cardNo):null;
-  $("wname").textContent=name+" Won!";
-  $("wcn").textContent=card?"CARTEL NO #"+cardNo:"";
-  if(card)drawCard($("wcard"),card,st.called,line);else $("wcard").innerHTML="";
-  $("ov").classList.add("on");if(st.auto||st.playing)playBingo();
-  let s=5;$("wst").textContent="STARTING IN "+s+"S";
-  const t=setInterval(()=>{s--;$("wst").textContent="STARTING IN "+s+"S";
-    if(s<=0){clearInterval(t);$("ov").classList.remove("on");resetLobby()}},1000);
+async function pick(n){
+  if(S.taken.includes(n)&&!S.mine.includes(n))return;
+  try{S=await api(S.mine.includes(n)?"/api/unpick":"/api/pick",{cartela:n});render();if(tg&&tg.HapticFeedback)tg.HapticFeedback.selectionChanged()}catch(e){toast(ERR[e]||e)}
 }
-function resetLobby(){
-  st.cards=[];$("prev").style.display="none";
-  goHome();
+function drawGame(){
+  const r=S.round,cl=S.called,n=cl[cl.length-1];
+  $("gp").textContent=S.players;$("gd").textContent=F(S.derash);$("gc").textContent=cl.length+"/75";
+  if(cl.length>lastN){lastN=cl.length;if(r.status==="running")playNum(n)}
+  const b=$("big");if(n){b.textContent=L(n)+"-"+n;b.style.background=CL[Math.floor((n-1)/15)]}else{b.textContent="—";b.style.background="#2f2b66"}
+  $("rec").innerHTML=cl.slice(-6,-1).reverse().map(x=>`<span style="background:${CL[Math.floor((x-1)/15)]}">${L(x)}${x}</span>`).join("");
+  $("mycards").innerHTML=S.mine.length?S.mine.map(c=>`<div class="mc"><div class="cn">CARTELA #${c}</div>${cardHTML(c,cl,null,n)}</div>`).join(""):'<div class="watch">👀 You are watching this round.<br>The next round starts soon.</div>';
+  if($("bd").style.display!=="none")drawBoard();
+  const ov=$("win");
+  if(r.status==="ended"||r.status==="cancelled"){
+    const sec=Math.max(0,Math.ceil((r.rest_ms-(Date.now()+off-r.ended_ts))/1000));ov.classList.add("on");
+    if(r.status==="ended"){const w=S.winners,me=w.some(x=>S.mine.includes(x.cartela));
+      $("wt").textContent=me?"🎉 YOU WON!":"BINGO!";$("wn").textContent=w.map(x=>x.name).join(", ")+" won "+F(S.derash/w.length)+" birr";
+      $("wc").innerHTML=w.length?`<div class="cn">CARTELA #${w[0].cartela}</div>`+cardHTML(w[0].cartela,cl,winLine(mk(w[0].cartela),cl)):""}
+    else{$("wt").textContent="Round cancelled";$("wn").textContent="Not enough players. Your stake was refunded.";$("wc").innerHTML=""}
+    $("ws").textContent="Next round in "+sec+"s"}
+  else ov.classList.remove("on");
 }
-function leave(){clearInterval(st.timer);if(_cur){_cur.pause()}resetLobby()}
-function updHome(){$("hw").textContent=wallet.play;$("mw").textContent=wallet.main;$("pw").textContent=wallet.play}
-function backHome(){wallet.play+=STAKE*st.cards.length;st.cards=[];$("prev").style.display="none";goHome()}
-function refreshLobby(){renderPicks()}
-function goHome(){clearInterval(st.lobbyT);updHome();$("gnav").style.display="flex";show("home");setNav(0)}
-function goLobby(){preloadVoices();$("gnav").style.display="flex";show("lobby");buildLobby()}
-function setNav(i){document.querySelectorAll("#gnav div").forEach((d,k)=>d.classList.toggle("on",k===i))}
-function tabTo(n,el){const i=[...el.parentNode.children].indexOf(el);setNav(i);if(n==="home"){goHome();return}const c=$("tabc");
-const li=(a,b)=>`<div class="li"><span>${a}</span><span>${b}</span></div>`;
-if(n==="scores")scoresPage("daily");
-if(n==="history")c.innerHTML="<h2>History</h2>"+(hist.length?hist.map(x=>li(x[0],x[1])).join(""):"<p style='color:#a9afbd'>No games yet.</p>");
-if(n==="wallet")walletPage();
-if(n==="profile")c.innerHTML="<h2>Profile</h2>"+li("Name",user.first_name)+li("Telegram ID",user.id||"-");
-show("tab")}
-let _tt;function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(_tt);_tt=setTimeout(()=>t.style.display="none",2200);if(tg&&tg.HapticFeedback)try{tg.HapticFeedback.notificationOccurred("error")}catch(e){}}
-const hist=[],deps=[];
-const _aud={};let _cur=null;
-function getAud(n){if(!_aud[n]){const a=new Audio(VOICE_DIR+n+'.m4a');a.preload='auto';_aud[n]=a}return _aud[n]}
-function playNum(n){try{if(_cur){_cur.pause();_cur.currentTime=0}const a=getAud(n);_cur=a;a.currentTime=0;const pr=a.play();if(pr&&pr.catch)pr.catch(()=>{})}catch(e){}}
-function playBingo(){try{if(_cur){_cur.pause()}const a=new Audio(VOICE_DIR+'bingo.m4a');_cur=a;const pr=a.play();if(pr&&pr.catch)pr.catch(()=>{})}catch(e){}}
-function preloadVoices(){for(let n=1;n<=75;n++)getAud(n)}
-document.addEventListener('click',function u(){const a=getAud(1);a.muted=true;const pr=a.play();if(pr&&pr.then)pr.then(()=>{a.pause();a.currentTime=0;a.muted=false}).catch(()=>{a.muted=false});document.removeEventListener('click',u)},{once:true});
-/* ===== Leaderboard =====
-   LB_API = "" -> works offline: your own games are saved on this device and ranked against demo rows.
-   LB_API = "https://your-server" -> shared leaderboard. Server must provide:
-     POST {LB_API}/game          body {id,name,ts}              (called after every game)
-     GET  {LB_API}/leaderboard?period=daily|weekly&id=<userId>
-          -> {top:[[name,games],...up to 10], me:{rank:<number|null>, played:<number>}}            */
-const LB_API="";
-const LB_KEY="aman_bingo_games_"+(user.id||"local");
-const DEMO={daily:[],weekly:[]};
-function lbLoad(){try{const a=JSON.parse(localStorage.getItem(LB_KEY)||"[]");return Array.isArray(a)?a:[]}catch(e){return[]}}
-function lbMe(){return(user.username||user.first_name||"player").toUpperCase()}
-function recordGame(){
-  const ts=Date.now(),a=lbLoad().filter(t=>ts-t<8*864e5);a.push(ts);   // keep last 8 days
-  try{localStorage.setItem(LB_KEY,JSON.stringify(a))}catch(e){}
-  if(LB_API)try{fetch(LB_API+"/game",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:user.id||null,name:lbMe(),ts})}).catch(()=>{})}catch(e){}
-}
-function lbCount(per){
-  const now=new Date(),since=per==="daily"?new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime():Date.now()-7*864e5;
-  return lbLoad().filter(t=>t>=since).length;
-}
-function lbRender(per,top,rank,played,note){
-  $("tabc").innerHTML=`<div class="myrank"><div class="rk">${rank?"#"+rank:"#—"}</div><div class="mid"><small>MY RANK</small><b>@${lbMe()}</b></div><div class="pl"><b>${played}</b><small>PLAYED</small></div></div>
-   <div class="seg"><div class="${per==='daily'?'on':''}" onclick="scoresPage('daily')">DAILY</div><div class="${per==='weekly'?'on':''}" onclick="scoresPage('weekly')">WEEKLY</div></div>
-   <div class="top10">TOP 10 PLAYERS</div>`+
-   top.map((r,i)=>`<div class="prow"><div class="bd ${i<3?'r'+(i+1):''}">${i+1}</div><div class="nm">@${r[0]}</div><div class="gm"><b>${r[1]}</b><small>GAMES</small></div></div>`).join("")+
-   (note?`<p style="color:#a9afbd;font-size:3.4vw;text-align:center;margin-top:14px">${note}</p>`:"");
-}
-function lbLocal(per){
-  const played=lbCount(per),me=lbMe();
-  const list=DEMO[per].map(r=>r.slice());
-  if(played>0)list.push([me,played]);
-  list.sort((x,y)=>y[1]-x[1]);
-  const rank=played>0?list.findIndex(r=>r[0]===me&&r[1]===played)+1:null;
-  lbRender(per,list.slice(0,10),rank,played,"Shared leaderboard needs the server — this shows only your own games.");
-}
-function scoresPage(per){
-  per=per||"daily";
-  if(!LB_API){lbLocal(per);return}
-  $("tabc").innerHTML="<h2>Leaderboard</h2><p style='color:#a9afbd'>Loading…</p>";
-  fetch(LB_API+"/leaderboard?period="+per+"&id="+encodeURIComponent(user.id||""))
-    .then(r=>{if(!r.ok)throw 0;return r.json()})
-    .then(d=>lbRender(per,(d.top||[]).slice(0,10),d.me&&d.me.rank,(d.me&&d.me.played)||0))
-    .catch(()=>lbLocal(per));
-}
-function walletPage(){
-  const li=(a,b)=>`<div class="li"><span>${a}</span><span>${b}</span></div>`;
-  $("tabc").innerHTML="<h2>Wallet</h2>"+li("Main wallet",wallet.main)+li("Play wallet",wallet.play)+
-   "<div class='row' style='margin-top:12px'><button class='btn' style='flex:1;background:#00c27a;border-color:#00c27a;color:#0b1a55' onclick='depMethods()'>Deposit</button><button class='btn' style='flex:1' onclick='wdMethods()'>Withdraw</button></div>"+
-   (deps.length?"<h3 style='margin:18px 0 8px'>Requests</h3>"+deps.map(d=>li((d.type||"Deposit")+" · "+d.m+" · "+d.amt+" birr","<span class='stt'>"+d.status+"</span>")).join(""):"");
-  show("tab");
-}
-function wdMethods(){
-  $("tabc").innerHTML="<h2>Withdraw</h2><p style='color:#a9afbd;margin-bottom:12px'>Main wallet: <b style='color:#fff'>"+wallet.main+"</b> birr · choose where to receive</p>"+
-   Object.keys(WITHDRAW_METHODS).map(k=>`<div class="mth" onclick="wdForm('${k}')"><span style="font-size:26px">${WITHDRAW_METHODS[k].icon}</span><div>${WITHDRAW_METHODS[k].label}<small>Tap to continue</small></div></div>`).join("")+
-   "<button class='btn' style='width:100%;margin-top:6px' onclick='walletPage()'>← Back</button>";
-}
-function wdForm(k){
-  const m=WITHDRAW_METHODS[k];
-  $("tabc").innerHTML=`<h2>Withdraw to ${m.label}</h2>
-   <input class="inp" id="wacc" type="text" inputmode="numeric" placeholder="${k==='telebirr'?'Telebirr phone number':'Account number'}">
-   <input class="inp" id="wname" type="text" placeholder="Account holder name">
-   <input class="inp" id="wamt" type="number" inputmode="numeric" placeholder="Amount (min ${MIN_WD} birr)">
-   <button class="btn" style="width:100%;margin-top:14px;background:#00c27a;border-color:#00c27a;color:#0b1a55" onclick="wdSubmit('${k}')">Request withdrawal</button>
-   <button class="btn" style="width:100%;margin-top:8px" onclick="wdMethods()">← Back</button>`;
-}
-function wdSubmit(k){
-  const acc=$("wacc").value.trim(),name=$("wname").value.trim(),amt=Number($("wamt").value);
-  if(acc.length<6){toast("Enter a valid account number");return}
-  if(name.length<3){toast("Enter the account holder name");return}
-  if(!(amt>=MIN_WD)){toast("Minimum withdrawal is "+MIN_WD+" birr");return}
-  if(wallet.main<amt){toast("❌ No balance");return}
-  wallet.main-=amt;  // held until paid out
-  // TODO backend: POST {user_id, method:k, account:acc, name, amount:amt} -> admin pays out, then marks Paid
-  deps.unshift({type:"Withdraw",m:WITHDRAW_METHODS[k].label.split(" ")[0],amt,status:"Pending"});
-  toast("✅ Withdrawal requested");walletPage();
-}
-function depMethods(){
-  $("tabc").innerHTML="<h2>Deposit</h2><p style='color:#a9afbd;margin-bottom:12px'>Choose a payment method</p>"+
-   Object.keys(DEPOSIT_ACCOUNTS).map(k=>`<div class="mth" onclick="depForm('${k}')"><span style="font-size:28px">${DEPOSIT_ACCOUNTS[k].icon}</span><div>${DEPOSIT_ACCOUNTS[k].label}<small>Tap to continue</small></div></div>`).join("")+
-   "<button class='btn' style='width:100%;margin-top:6px' onclick='walletPage()'>← Back</button>";
-}
-function copyNum(k,btn){
-  const t=DEPOSIT_ACCOUNTS[k].number,done=ok=>{if(btn)btn.textContent=ok?"Copied ✓":"Hold the number to copy";toast(ok?"Account number copied":"Hold the number to copy")};
-  const fb=()=>{try{const i=document.createElement("textarea");i.value=t;i.style.cssText="position:fixed;opacity:0";document.body.appendChild(i);i.select();const ok=document.execCommand("copy");document.body.removeChild(i);done(ok)}catch(e){done(false)}};
-  try{navigator.clipboard.writeText(t).then(()=>done(true),fb)}catch(e){fb()}
-}
-function depForm(k){
-  const a=DEPOSIT_ACCOUNTS[k];
-  $("tabc").innerHTML=`<h2>Deposit via ${a.label}</h2>
-   <div class="acc">Send money to<b id="accn" style="user-select:text;-webkit-user-select:text" onclick="copyNum('${k}',$('cpbtn'))">${a.number}</b>${a.name}<br><button id="cpbtn" class="btn" style="margin:10px auto 0;padding:8px 16px" onclick="copyNum('${k}',this)">Copy number</button></div>
-   <input class="inp" id="damt" type="number" inputmode="numeric" placeholder="Amount (min ${MIN_DEP} birr)">
-   <input class="inp" id="dref" type="text" placeholder="Transaction ID / reference number">
-   <button class="btn" style="width:100%;margin-top:14px;background:#00c27a;border-color:#00c27a;color:#0b1a55" onclick="depSubmit('${k}')">Submit deposit</button>
-   <button class="btn" style="width:100%;margin-top:8px" onclick="depMethods()">← Back</button>`;
-}
-function depSubmit(k){
-  const amt=Number($("damt").value),ref=$("dref").value.trim();
-  if(!(amt>=MIN_DEP)){toast("Minimum deposit is "+MIN_DEP+" birr");return}
-  if(ref.length<5){toast("Enter the transaction ID from your receipt");return}
-  // TODO backend: POST {user_id, method:k, amount:amt, ref} -> admin/bot verifies, then credits the play wallet
-  deps.unshift({m:DEPOSIT_ACCOUNTS[k].label.split(" ")[0],amt,ref,status:"Pending"});
-  toast("✅ Deposit request sent — pending confirmation");
-  walletPage();
-}
-function refresh(){if(st.playing)renderMine()}
-$("sw").onclick=()=>{st.auto=!st.auto;$("sw").classList.toggle("off",!st.auto);setAct()};
-goHome();
-</script>
-</body>
-</html>
+function tb(){const e=$("bd");e.style.display=e.style.display==="none"?"flex":"none";if(S)drawBoard()}
+function drawBoard(){$("bd").innerHTML=[..."BINGO"].map((l,i)=>`<div><b style="background:${CL[i]}">${l}</b>`+Array.from({length:15},(_,k)=>{const n=i*15+k+1;return`<span class="${S.called.includes(n)?"k":""}">${n}</span>`}).join("")+"</div>").join("")}
+async function backHome(){inGame=false;for(const n of S.mine.slice()){try{await api("/api/unpick",{cartela:n})}catch(e){}}goHome()}
+function leaveGame(){inGame=false;$("win").classList.remove("on");goHome()}
+
+/* wallet */
+const SL=x=>({pending:"Pending",paid:"Approved",approved:"Approved",rejected:"Rejected"}[x]||x),SC=x=>x==="paid"||x==="approved"?"#18d98b":x==="rejected"?"#ff3d71":"#ffd23f";
+let sel="telebirr",wsel="telebirr",pendW=false;const WM={telebirr:"Telebirr",boa:"BOA",dashen:"Dashen Bank",cbe:"CBE"};
+function wmSel(k){wsel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="wm_"+k))}
+function opts(){return Object.keys(PAY).map(k=>`<option value="${k}">${PAY[k].n}</option>`).join("")}
+function pmSel(k){sel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="pm_"+k))}
+function wf(t){
+  if(t==="w"&&pendW){$("wform").innerHTML='<div class="watch">⏳ You have a pending withdrawal.<br>Wait until it is approved before requesting another.</div>';return}
+  $("wform").innerHTML=t==="d"?Object.keys(PAY).map(k=>`<div class="mth" id="pm_${k}" onclick="pmSel('${k}')"><img src="${IMG[k]}"><div><b>${PAY[k].n}</b><span>${PAY[k].a}</span><small>${PAY[k].h}</small></div></div>`).join("")+`<input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="Amount (min 30 birr)"><input class="inp" id="fa2" placeholder="Transaction ID"><button class="gb" style="background:var(--gr);color:#08301f" onclick="dep()">Submit deposit</button>`
+  :Object.keys(WM).map(k=>`<div class="mth" id="wm_${k}" onclick="wmSel('${k}')"><img src="${IMG[k]}"><div><b>${WM[k]}</b><small>Receive here</small></div></div>`).join("")+`<input class="inp" id="fa2" placeholder="Your account number / phone"><input class="inp" id="fa3" placeholder="Account holder name"><input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="Amount (min 50 birr)"><button class="gb" onclick="wd()">Request withdrawal</button>`;
+  if(t==="d")pmSel(sel);else wmSel(wsel)}
+async function openWallet(){show("wal");$("wform").innerHTML="";try{const me=await api("/api/me");$("wb").textContent=F(me.balance);$("wbn").textContent=F(me.bonus);pendW=me.withdrawals.some(x=>x.status==="pending");
+  $("whist").innerHTML=[...me.deposits.map(x=>["Deposit",x]),...me.withdrawals.map(x=>["Withdraw",x])].map(([t,x])=>`<div class="li"><span>${t} ${F(x.amount)}</span><span style="color:${SC(x.status)}">${SL(x.status)}</span></div>`).join("")}catch(e){toast(ERR[e]||e)}}
+async function dep(){try{const d=await api("/api/deposit",{amount:$("fa1").value,txid:$("fa2").value,method:sel});toast(d.status==="approved"?"✅ Deposit received":"✅ Request sent - pending confirmation");openWallet()}catch(e){toast(ERR[e]||e)}}
+async function wd(){try{await api("/api/withdraw",{amount:$("fa1").value,account:$("fa2").value,name:$("fa3").value,method:wsel});toast("✅ Withdrawal requested - Pending");openWallet()}catch(e){toast(ERR[e]||e)}}
+boot();
+</script></body></html>
