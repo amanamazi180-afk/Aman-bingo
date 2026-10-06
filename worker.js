@@ -3,8 +3,11 @@
 //   BOT_TOKEN, ADMIN_TG_ID, SMS_SECRET, TG_SECRET, ADMIN_KEY (secrets) · GAME_URL, ALLOW_ORIGIN, STAKE (plain variables)
 const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 400, MIN_DEP = 30, MIN_WD = 50;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
-const bonusC = env => C(env.DAILY_BONUS ?? 10), bonusPeriod = now => Math.floor((now - 5 * 36e5) / 864e5); // new period starts 08:00 Ethiopia time (05:00 UTC)
-const refreshBonus = (env, id, now) => env.DB.prepare('UPDATE users SET bonus_c=?1,bonus_period=?2 WHERE id=?3 AND bonus_period<?2').bind(bonusC(env), bonusPeriod(now), id).run(); // reset to the daily amount, never added on top
+const welcomeC = env => C(env.WELCOME_BONUS ?? 10); // one-time gift when a player registers
+const bonusC = env => C(env.DAILY_BONUS ?? 0), // daily bonus is off unless DAILY_BONUS is set
+   bonusPeriod = now => Math.floor((now - 5 * 36e5) / 864e5); // new period starts 08:00 Ethiopia time (05:00 UTC)
+const refreshBonusStmt = (env, id, now) => env.DB.prepare('UPDATE users SET bonus_c=?1,bonus_period=?2 WHERE id=?3 AND (bonus_period<?2 OR (?1=0 AND bonus_c<>0))').bind(bonusC(env), bonusPeriod(now), id); // resets to the daily amount (0 = off), never added on top
+const refreshBonus = (env, id, now) => refreshBonusStmt(env, id, now).run();
 const rnd32 = () => crypto.getRandomValues(new Uint32Array(1))[0];
 const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { 'content-type': 'application/json' } });
 
@@ -96,9 +99,11 @@ const ensureTables = async env => { if (tablesReady) return; await env.DB.batch(
   env.DB.prepare('CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY,v TEXT)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS bans(id INTEGER PRIMARY KEY)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT,ts INTEGER,actor TEXT,action TEXT,detail TEXT)')]); tablesReady = true };
-const getSet = async (env, k) => { await ensureTables(env); const r = await env.DB.prepare('SELECT v FROM settings WHERE k=?').bind(k).first(); return r ? r.v : null };
-const setSet = async (env, k, v) => { await ensureTables(env); await env.DB.prepare('INSERT INTO settings(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v').bind(k, v).run() };
-const isBanned = async (env, id) => { await ensureTables(env); return !!(await env.DB.prepare('SELECT 1 x FROM bans WHERE id=?').bind(id).first()) };
+const cfg = { t: 0, set: {}, bans: new Set() }; // settings and bans are cached for 5 seconds to keep requests fast
+const loadCfg = async env => { if (Date.now() - cfg.t < 5000) return cfg; await ensureTables(env); const [a, b] = await env.DB.batch([env.DB.prepare('SELECT k,v FROM settings'), env.DB.prepare('SELECT id FROM bans')]); cfg.set = Object.fromEntries(a.results.map(r => [r.k, r.v])); cfg.bans = new Set(b.results.map(r => String(r.id))); cfg.t = Date.now(); return cfg };
+const getSet = async (env, k) => (await loadCfg(env)).set[k] ?? null;
+const setSet = async (env, k, v) => { await ensureTables(env); await env.DB.prepare('INSERT INTO settings(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v').bind(k, v).run(); cfg.t = 0 };
+const isBanned = async (env, id) => (await loadCfg(env)).bans.has(String(id));
 
 /* ---------- shared game rounds (advanced lazily on every request) ---------- */
 const latest = db => db.prepare('SELECT * FROM rounds ORDER BY id DESC LIMIT 1').first();
@@ -135,12 +140,12 @@ async function advance(env) {
   }
   return r;
 }
-async function stateFor(env, u) {
-  const db = env.DB, r = await advance(env), now = Date.now();
-  const picks = (await db.prepare('SELECT p.cartela,p.user_id,u.name FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=?').bind(r.id).all()).results;
+async function stateFor(env, u, round) {
+  const db = env.DB, r = round || await advance(env), now = Date.now();
+  const [pr, mr] = await db.batch([db.prepare('SELECT p.cartela,p.user_id,u.name FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=?').bind(r.id), db.prepare('SELECT balance,bonus_c FROM users WHERE id=?').bind(u.id)]);
+  const picks = pr.results, me = mr.results[0];
   const n = r.status === 'running' ? callsAt(r, now) : r.status === 'ended' ? r.called_n : 0;
   const win = r.status === 'ended' ? JSON.parse(r.winners || '[]') : [];
-  const me = await db.prepare('SELECT balance,bonus_c FROM users WHERE id=?').bind(u.id).first();
   return { now, round: { id: r.id, status: r.status, start_ts: r.start_ts, lobby_ms: LOBBY_MS, call_ms: CALL_MS, stake: B(r.stake_c), rest_ms: REST_MS, ended_ts: r.ended_ts },
     taken: picks.map(p => p.cartela), mine: picks.filter(p => p.user_id === u.id).map(p => p.cartela),
     called: numberOrder(r.seed).slice(0, n), players: new Set(picks.map(p => p.user_id)).size, cards: picks.length,
@@ -249,6 +254,7 @@ async function adminRoute(req, env, url) {
   if (name === 'ban' || name === 'unban') {
     const id = Math.floor(Number(b.id)); if (!(id > 0)) return J({ error: 'bad_input' }, 400);
     if (name === 'ban') await db.prepare('INSERT OR IGNORE INTO bans(id) VALUES(?)').bind(id).run(); else await db.prepare('DELETE FROM bans WHERE id=?').bind(id).run();
+    cfg.t = 0;
     await log(name, 'player ' + id);
     return J({ ok: true });
   }
@@ -297,14 +303,15 @@ async function route(req, env, url) {
   if (!p.startsWith('/api/')) return J({ error: 'not_found' }, 404);
   if (p.startsWith('/api/admin/')) return adminRoute(req, env, url);
   const tu = await verifyInit(req.headers.get('x-init-data'), env.BOT_TOKEN); if (!tu) return J({ error: 'unauthorized' }, 401);
-  await db.prepare('INSERT INTO users(id,name,created_ts) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').bind(tu.id, tu.first_name || 'player', now).run();
-  await refreshBonus(env, tu.id, now);
-  const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(tu.id).first(), b = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+  const rs = await db.batch([db.prepare('INSERT INTO users(id,name,created_ts) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').bind(tu.id, tu.first_name || 'player', now), refreshBonusStmt(env, tu.id, now), db.prepare('SELECT * FROM users WHERE id=?').bind(tu.id)]); // one round trip
+  const u = rs[2].results[0], b = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
   const need = () => u.phone ? null : J({ error: 'not_registered' }, 403);
   if (p !== '/api/me' && await isBanned(env, u.id)) return J({ error: 'banned' }, 403);
   if (p === '/api/me') { const dep = (await db.prepare('SELECT amount_c,status,ts FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results, wd = (await db.prepare('SELECT amount_c,status,ts FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results; return J({ id: u.id, name: u.name, phone: u.phone, registered: !!u.phone, balance: B(u.balance), bonus: B(u.bonus_c), deposits: dep.map(x => ({ ...x, amount: B(x.amount_c) })), withdrawals: wd.map(x => ({ ...x, amount: B(x.amount_c) })) }) }
   if (p === '/api/register') { if (u.phone) return J({ error: 'already_registered' }, 409); const ph = normPhone(b.phone), nm = String(b.name || '').trim().slice(0, 30); if (!ph || nm.length < 2) return J({ error: 'bad_input' }, 400);
-    try { await db.prepare('UPDATE users SET name=?,phone=? WHERE id=?').bind(nm, ph, u.id).run() } catch (e) { return J({ error: 'phone_used' }, 409) } return J({ ok: true }) }
+    try { const rr = await db.prepare("UPDATE users SET name=?1,phone=?2,balance=balance+?3 WHERE id=?4 AND (phone IS NULL OR phone='')").bind(nm, ph, welcomeC(env), u.id).run(); if (!rr.meta.changes) return J({ error: 'already_registered' }, 409) } catch (e) { return J({ error: 'phone_used' }, 409) }
+    if (welcomeC(env) > 0) await say(env, u.id, `🎉 Congratulations! Welcome to Aman Bingo. ${B(welcomeC(env))} birr was added to your wallet.`, playKb(env));
+    return J({ ok: true }) }
   if (p === '/api/state') return J(await stateFor(env, u));
   if (p === '/api/leaderboard') return J(await leaderboard(env, u, url.searchParams.get('period')));
   const bad = need(); if (bad) return bad;
@@ -322,7 +329,7 @@ async function route(req, env, url) {
         db.prepare("UPDATE users SET bonus_c=MIN(?5,bonus_c+(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)),balance=balance+(?4-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)) WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3) AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id, r.stake_c, bonusC(env)),
         db.prepare("DELETE FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id)]);
     } catch (e) { return J({ error: errOf(e) }, 409) }
-    return J(await stateFor(env, u));
+    return J(await stateFor(env, u, r));
   }
   if (p === '/api/deposit') {
     const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = b.method === 'boa' ? 'boa' : 'telebirr';
