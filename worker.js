@@ -46,7 +46,11 @@ export async function verifyInit(initData, token, maxAge = 86400) {
   try { return JSON.parse(p.get('user')) } catch (e) { return null }
 }
 const tg = (env, method, body) => fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => { });
-const say = (env, chat, text, kb) => tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: kb ? { inline_keyboard: kb } : undefined });
+const adminUrl = env => env.ADMIN_URL || 'https://amanamazi180-afk.github.io/Aman-bingo/admin.html';
+const say = (env, chat, text, kb) => { // the Admin button is added only for the admin's own chat
+  if (kb && String(chat) === String(env.ADMIN_TG_ID) && kb[0] && kb[0][0] && kb[0][0].web_app) kb = [...kb, [{ text: 'Admin 🛠', web_app: { url: adminUrl(env) } }]];
+  return tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: kb ? { inline_keyboard: kb } : undefined });
+};
 const playKb = env => [[{ text: 'Play 🎮', web_app: { url: env.GAME_URL } }]];
 
 /* ---------- money operations (each is one atomic batch) ---------- */
@@ -153,7 +157,7 @@ async function onTelegram(env, up) {
     for (const x of w) await say(env, uid, withdrawText(x), [[{ text: '💸 Mark paid', callback_data: 'wp:' + x.id }, { text: '↩️ Reject', callback_data: 'wr:' + x.id }]]);
     return;
   }
-  if (cmd === '/admin' && String(uid) === admin) return say(env, uid, 'Admin dashboard', [[{ text: 'Open admin 🛠', web_app: { url: env.ADMIN_URL || 'https://amanamazi180-afk.github.io/Aman-bingo/admin.html' } }]]);
+  if (cmd === '/admin' && String(uid) === admin) return tg(env, 'sendMessage', { chat_id: uid, text: 'Admin dashboard', reply_markup: { inline_keyboard: [[{ text: 'Open admin 🛠', web_app: { url: adminUrl(env) } }]] } });
   const hint = { '/register': 'register', '/deposit': 'deposit', '/withdraw': 'withdraw', '/transfer': 'transfer', '/invite': 'invite friends', '/instruction': 'read the instructions', '/support': 'contact support' }[cmd];
   return say(env, uid, hint ? `Open the game to ${hint}.` : 'Welcome to Aman Bingo! Tap Play to start.', playKb(env));
 }
