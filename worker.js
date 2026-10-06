@@ -153,6 +153,7 @@ async function onTelegram(env, up) {
     for (const x of w) await say(env, uid, withdrawText(x), [[{ text: '💸 Mark paid', callback_data: 'wp:' + x.id }, { text: '↩️ Reject', callback_data: 'wr:' + x.id }]]);
     return;
   }
+  if (cmd === '/admin' && String(uid) === admin) return say(env, uid, 'Admin dashboard', [[{ text: 'Open admin 🛠', web_app: { url: env.ADMIN_URL || 'https://amanamazi180-afk.github.io/Aman-bingo/admin.html' } }]]);
   const hint = { '/register': 'register', '/deposit': 'deposit', '/withdraw': 'withdraw', '/transfer': 'transfer', '/invite': 'invite friends', '/instruction': 'read the instructions', '/support': 'contact support' }[cmd];
   return say(env, uid, hint ? `Open the game to ${hint}.` : 'Welcome to Aman Bingo! Tap Play to start.', playKb(env));
 }
@@ -162,7 +163,9 @@ const withdrawText = x => `💸 Withdrawal #${x.id}\n${x.name} · ${x.phone}\nAm
 /* ---------- admin dashboard routes (password = ADMIN_KEY secret, header X-Admin-Key) ---------- */
 async function adminRoute(req, env, url) {
   const key = req.headers.get('x-admin-key');
-  if (!env.ADMIN_KEY || key !== env.ADMIN_KEY) return J({ error: 'forbidden' }, 403);
+  let allowed = !!env.ADMIN_KEY && key === env.ADMIN_KEY;
+  if (!allowed) { const tu = await verifyInit(req.headers.get('x-init-data'), env.BOT_TOKEN); allowed = !!tu && String(tu.id) === String(env.ADMIN_TG_ID); } // opened from the admin's own Telegram account
+  if (!allowed) return J({ error: 'forbidden' }, 403);
   const db = env.DB, name = url.pathname.replace('/api/admin/', '');
   const b = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
   const n = async sql => (await db.prepare(sql).first()).v || 0;

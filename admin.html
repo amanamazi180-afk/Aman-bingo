@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aman Bingo Admin</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{--bg:#12141c;--card:#1b1e29;--line:#2c3040;--tx:#e9e6dc;--mut:#8d91a3;--gold:#f2b84b;--ok:#4fbf8a;--bad:#e0645c}
 *{box-sizing:border-box}
@@ -45,6 +46,8 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 // Your Worker address. Change only if it moves.
 const API = "https://aman-bingo.amanamazi180.workers.dev";
 const TABS = ["Overview","Pending","Players","Rounds","Game"];
+const tgd = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) || "";
+if(tgd){ try{ Telegram.WebApp.ready(); Telegram.WebApp.expand(); }catch(e){} }
 let key = sessionStorage.getItem("ak") || "", tab = "Overview";
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -52,7 +55,7 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;
 function say(t, kind){ const m=$("msg"); m.textContent=t; m.className=kind||""; if(!t) m.style.display="none"; else m.style.display="block"; }
 
 async function call(path, body){
-  const opt = { headers:{ "X-Admin-Key": key, "Content-Type":"application/json" } };
+  const opt = { headers:{ "X-Admin-Key": key, "X-Init-Data": tgd, "Content-Type":"application/json" } };
   if(body){ opt.method="POST"; opt.body=JSON.stringify(body); }
   let r;
   try { r = await fetch(API + path, opt); }
@@ -119,6 +122,7 @@ $("go").onclick = async () => {
 };
 $("key").addEventListener("keydown", e => { if(e.key==="Enter") $("go").click(); });
 if(key){ $("key").value=key; $("go").click(); }
+else if(tgd){ call("/api/admin/overview").then(()=>{ $("login").hidden=true; $("app").hidden=false; show(); }).catch(()=>{}); }
 </script>
 </body>
 </html>
