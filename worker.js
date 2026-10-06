@@ -90,6 +90,16 @@ async function decideWithdraw(env, id, paid) {
   return done;
 }
 
+/* ---------- settings, bans and admin log (tables are created automatically) ---------- */
+let tablesReady = false;
+const ensureTables = async env => { if (tablesReady) return; await env.DB.batch([
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY,v TEXT)'),
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS bans(id INTEGER PRIMARY KEY)'),
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT,ts INTEGER,actor TEXT,action TEXT,detail TEXT)')]); tablesReady = true };
+const getSet = async (env, k) => { await ensureTables(env); const r = await env.DB.prepare('SELECT v FROM settings WHERE k=?').bind(k).first(); return r ? r.v : null };
+const setSet = async (env, k, v) => { await ensureTables(env); await env.DB.prepare('INSERT INTO settings(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v').bind(k, v).run() };
+const isBanned = async (env, id) => { await ensureTables(env); return !!(await env.DB.prepare('SELECT 1 x FROM bans WHERE id=?').bind(id).first()) };
+
 /* ---------- shared game rounds (advanced lazily on every request) ---------- */
 const latest = db => db.prepare('SELECT * FROM rounds ORDER BY id DESC LIMIT 1').first();
 const callsAt = (r, now) => Math.min(75, Math.max(0, Math.floor((now - r.start_ts - LOBBY_MS) / CALL_MS) + 1));
@@ -102,8 +112,10 @@ function refundAndClose(env, r, from, now) {
 async function advance(env) {
   const db = env.DB, now = Date.now(); let r = await latest(db);
   if (!r || (r.status !== 'lobby' && r.status !== 'running' && now - r.ended_ts >= REST_MS)) {
-    await db.prepare("INSERT INTO rounds(start_ts,seed,status,stake_c) SELECT ?1,?2,'lobby',?3 WHERE NOT EXISTS(SELECT 1 FROM rounds WHERE status IN('lobby','running'))").bind(now, rnd32(), C(env.STAKE || 10)).run();
-    r = await latest(db);
+    if (!r || (await getSet(env, 'paused')) !== '1') { // admin can pause new rounds
+      await db.prepare("INSERT INTO rounds(start_ts,seed,status,stake_c) SELECT ?1,?2,'lobby',?3 WHERE NOT EXISTS(SELECT 1 FROM rounds WHERE status IN('lobby','running'))").bind(now, rnd32(), C((await getSet(env, 'stake')) || env.STAKE || 10)).run();
+      r = await latest(db);
+    }
   }
   if (r.status === 'lobby' && now - r.start_ts >= LOBBY_MS) {
     const n = (await db.prepare('SELECT COUNT(DISTINCT user_id) n FROM picks WHERE round_id=?').bind(r.id).first()).n;
@@ -180,15 +192,18 @@ const depositText = x => `💰 Deposit #${x.id}\n${x.name} · ${x.phone}\nAmount
 const notifyAdmins = async (env, text, kb) => Promise.all((await admins(env)).map(a => say(env, a, text, kb)));
 const withdrawText = x => `💸 Withdrawal #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr\nSend to: ${x.method} ${x.account}`;
 
-/* ---------- admin dashboard routes (password = ADMIN_KEY secret, header X-Admin-Key) ---------- */
+/* ---------- admin dashboard routes (password = ADMIN_KEY secret, or a Telegram admin account) ---------- */
 async function adminRoute(req, env, url) {
   const key = req.headers.get('x-admin-key');
-  let allowed = !!env.ADMIN_KEY && key === env.ADMIN_KEY;
-  if (!allowed) { const tu = await verifyInit(req.headers.get('x-init-data'), env.BOT_TOKEN); allowed = !!tu && await isAdmin(env, tu.id); } // opened from the admin's own Telegram account
-  if (!allowed) return J({ error: 'forbidden' }, 403);
+  let actor = null;
+  if (env.ADMIN_KEY && key === env.ADMIN_KEY) actor = 'password';
+  else { const tu = await verifyInit(req.headers.get('x-init-data'), env.BOT_TOKEN); if (tu && await isAdmin(env, tu.id)) actor = String(tu.id); }
+  if (!actor) return J({ error: 'forbidden' }, 403);
+  await ensureTables(env);
   const db = env.DB, name = url.pathname.replace('/api/admin/', '');
   const b = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
   const n = async sql => (await db.prepare(sql).first()).v || 0;
+  const log = (action, detail) => db.prepare('INSERT INTO admin_log(ts,actor,action,detail) VALUES(?,?,?,?)').bind(Date.now(), actor, action, String(detail || '')).run();
 
   if (name === 'overview') {
     return J({
@@ -214,24 +229,54 @@ async function adminRoute(req, env, url) {
     if (b.type === 'deposit') done = await decideDeposit(env, id, ok);
     else if (b.type === 'withdraw') done = await decideWithdraw(env, id, ok); // approve = mark paid, reject = refund balance
     else return J({ error: 'bad_input' }, 400);
+    if (done) await log(name, b.type + ' #' + id);
     return J({ ok: done });
   }
   if (name === 'players') {
-    const r = (await db.prepare('SELECT id,name,phone,balance FROM users ORDER BY created_ts DESC LIMIT 100').all()).results;
-    return J({ items: r.map(x => ({ id: x.id, name: x.name, phone: x.phone || 'not registered', balance: B(x.balance) })) });
+    const q = String(url.searchParams.get('q') || '').trim().slice(0, 40), like = '%' + q + '%';
+    const sql = 'SELECT u.id,u.name,u.phone,u.balance,(SELECT 1 FROM bans WHERE id=u.id) banned FROM users u' + (q ? ' WHERE u.name LIKE ?1 OR u.phone LIKE ?1 OR CAST(u.id AS TEXT) LIKE ?1' : '') + ' ORDER BY u.created_ts DESC LIMIT 100';
+    const r = (await (q ? db.prepare(sql).bind(like) : db.prepare(sql)).all()).results;
+    return J({ items: r.map(x => ({ id: x.id, name: x.name, phone: x.phone || 'not registered', balance: B(x.balance), banned: !!x.banned })) });
+  }
+  if (name === 'adjust') { // add (+) or remove (-) birr on a player's balance
+    const id = Math.floor(Number(b.id)), amt = Number(b.amount);
+    if (!(id > 0) || !isFinite(amt) || amt === 0 || Math.abs(amt) > 100000) return J({ error: 'bad_input' }, 400);
+    try { const r = await db.prepare('UPDATE users SET balance=balance+?1 WHERE id=?2').bind(C(amt), id).run(); if (!r.meta.changes) return J({ error: 'no_player' }, 409) } catch (e) { return J({ error: 'insufficient_balance' }, 409) }
+    await log(amt > 0 ? 'add balance' : 'remove balance', 'player ' + id + ' ' + amt + ' birr');
+    say(env, id, amt > 0 ? `✅ ${amt} birr was added to your balance.` : `ℹ️ ${-amt} birr was removed from your balance by an admin.`);
+    return J({ ok: true, balance: B((await db.prepare('SELECT balance FROM users WHERE id=?').bind(id).first()).balance) });
+  }
+  if (name === 'ban' || name === 'unban') {
+    const id = Math.floor(Number(b.id)); if (!(id > 0)) return J({ error: 'bad_input' }, 400);
+    if (name === 'ban') await db.prepare('INSERT OR IGNORE INTO bans(id) VALUES(?)').bind(id).run(); else await db.prepare('DELETE FROM bans WHERE id=?').bind(id).run();
+    await log(name, 'player ' + id);
+    return J({ ok: true });
   }
   if (name === 'rounds') {
     const r = (await db.prepare('SELECT r.id,r.status,r.stake_c,(SELECT COUNT(DISTINCT user_id) FROM picks WHERE round_id=r.id) players,(SELECT COUNT(*) FROM picks WHERE round_id=r.id) cards FROM rounds r ORDER BY r.id DESC LIMIT 30').all()).results;
     return J({ items: r.map(x => ({ id: x.id, status: x.status, players: x.players, pot: B(x.cards * x.stake_c) })) });
   }
+  if (name === 'set-stake') {
+    const st = Number(b.stake); if (!(st >= 1 && st <= 1000)) return J({ error: 'bad_input' }, 400);
+    await setSet(env, 'stake', String(st)); await log('set stake', st + ' birr (from the next round)');
+    return J({ ok: true, stake: st });
+  }
+  if (name === 'pause') {
+    await setSet(env, 'paused', b.paused ? '1' : '0'); await log(b.paused ? 'pause game' : 'resume game', '');
+    return J({ ok: true, paused: !!b.paused });
+  }
+  if (name === 'log') {
+    const r = (await db.prepare('SELECT ts,actor,action,detail FROM admin_log ORDER BY id DESC LIMIT 30').all()).results;
+    return J({ items: r });
+  }
   if (name === 'game' || name === 'game-start' || name === 'game-stop') {
     let r = await advance(env);
     if (name === 'game-stop' && (r.status === 'lobby' || r.status === 'running')) {
       await refundAndClose(env, r, r.status, Date.now()); // cancels the round and returns every stake
-      r = await advance(env);
+      await log('cancel round', 'round ' + r.id); r = await advance(env);
     }
     const c = await db.prepare('SELECT COUNT(DISTINCT user_id) p,COUNT(*) c FROM picks WHERE round_id=?').bind(r.id).first();
-    return J({ ok: true, status: r.status, round: r.id, stake: B(r.stake_c), players: c.p, cards: c.c });
+    return J({ ok: true, status: r.status, round: r.id, stake: B(r.stake_c), next_stake: Number((await getSet(env, 'stake')) || env.STAKE || 10), paused: (await getSet(env, 'paused')) === '1', players: c.p, cards: c.c });
   }
   return J({ error: 'not_found' }, 404);
 }
@@ -256,6 +301,7 @@ async function route(req, env, url) {
   await refreshBonus(env, tu.id, now);
   const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(tu.id).first(), b = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
   const need = () => u.phone ? null : J({ error: 'not_registered' }, 403);
+  if (p !== '/api/me' && await isBanned(env, u.id)) return J({ error: 'banned' }, 403);
   if (p === '/api/me') { const dep = (await db.prepare('SELECT amount_c,status,ts FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results, wd = (await db.prepare('SELECT amount_c,status,ts FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results; return J({ id: u.id, name: u.name, phone: u.phone, registered: !!u.phone, balance: B(u.balance), bonus: B(u.bonus_c), deposits: dep.map(x => ({ ...x, amount: B(x.amount_c) })), withdrawals: wd.map(x => ({ ...x, amount: B(x.amount_c) })) }) }
   if (p === '/api/register') { if (u.phone) return J({ error: 'already_registered' }, 409); const ph = normPhone(b.phone), nm = String(b.name || '').trim().slice(0, 30); if (!ph || nm.length < 2) return J({ error: 'bad_input' }, 400);
     try { await db.prepare('UPDATE users SET name=?,phone=? WHERE id=?').bind(nm, ph, u.id).run() } catch (e) { return J({ error: 'phone_used' }, 409) } return J({ ok: true }) }
@@ -265,6 +311,7 @@ async function route(req, env, url) {
   if (p === '/api/pick' || p === '/api/unpick') {
     const r = await advance(env), no = Math.floor(Number(b.cartela)); if (!(no >= 1 && no <= TOTAL)) return J({ error: 'bad_input' }, 400);
     if (r.status !== 'lobby' || now - r.start_ts >= LOBBY_MS) return J({ error: 'round_closed' }, 409);
+    if (p === '/api/pick' && (await getSet(env, 'paused')) === '1') return J({ error: 'paused' }, 409);
     try {
       if (p === '/api/pick') {
         const res = await db.batch([

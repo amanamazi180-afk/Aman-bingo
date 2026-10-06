@@ -28,6 +28,10 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 #msg.err{display:block;background:#3a1b1a;border:1px solid var(--bad)}
 #msg.good{display:block;background:#12301f;border:1px solid var(--ok)}
 .empty{color:var(--mut);padding:16px 0}
+.prow{border-bottom:1px solid var(--line);padding:8px 0}
+.prow .row{border:0;padding:4px 0}
+.prow .acts,.row .acts{flex-wrap:wrap}
+.bantag{color:var(--bad)}
 </style>
 </head>
 <body>
@@ -45,7 +49,8 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 <script>
 // Your Worker address. Change only if it moves.
 const API = "https://aman-bingo.amanamazi180.workers.dev";
-const TABS = ["Overview","Pending","Players","Rounds","Game"];
+const TABS = ["Overview","Pending","Players","Rounds","Game","Log"];
+let q = "";
 const tgd = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) || "";
 if(tgd){ try{ Telegram.WebApp.ready(); Telegram.WebApp.expand(); }catch(e){} }
 let key = sessionStorage.getItem("ak") || "", tab = "Overview";
@@ -62,7 +67,11 @@ async function call(path, body){
   catch(e){ throw new Error("Cannot reach " + API + path + ". The Worker is down, the address is wrong, or the Worker does not allow requests from this page (CORS)."); }
   if(r.status===401||r.status===403) throw new Error("Wrong admin password.");
   if(r.status===404) throw new Error("The Worker has no route " + path + ". Add this route to worker.js.");
-  if(!r.ok) throw new Error("Server error " + r.status + ": " + (await r.text()).slice(0,200));
+  if(!r.ok){
+    const t = await r.text(); let m = t; try { m = JSON.parse(t).error || t; } catch(e){}
+    const nice = { insufficient_balance:"That player does not have enough balance.", bad_input:"Please check the number you entered.", no_player:"Player not found." }[m];
+    throw new Error(nice || ("Server error " + r.status + ": " + t.slice(0,200)));
+  }
   return r.json();
 }
 
@@ -80,8 +89,10 @@ const views = {
       <div class="acts"><button class="ok" data-a="approve" data-type="${esc(p.type)}" data-id="${esc(p.id)}">${p.type==="withdraw"?"Mark paid":"Approve"}</button><button class="bad" data-a="reject" data-type="${esc(p.type)}" data-id="${esc(p.id)}">Reject</button></div></div>`);
   },
   async Players(){
-    const d = await call("/api/admin/players");
-    return list(d.items, p => `<div class="row"><div><b>${esc(p.name)}</b><small>${esc(p.phone)}</small></div><b>${esc(p.balance)} birr</b></div>`);
+    const d = await call("/api/admin/players?q=" + encodeURIComponent(q));
+    const box = `<div class="row"><input id="q" placeholder="Search name, phone or ID" value="${esc(q)}" style="flex:1;min-width:0"><button class="pri" data-a="search">Search</button></div>`;
+    return box + list(d.items, p => `<div class="prow"><div class="row"><div><b>${esc(p.name)}${p.banned ? ' <span class="bantag">· banned</span>' : ''}</b><small>${esc(p.phone)} · ID ${esc(p.id)}</small></div><b>${esc(p.balance)} birr</b></div>
+      <div class="acts"><input type="number" step="any" min="0" placeholder="birr" id="amt-${esc(p.id)}" style="width:100px"><button class="ok" data-a="add" data-id="${esc(p.id)}">Add</button><button data-a="remove" data-id="${esc(p.id)}">Remove</button><button class="bad" data-a="${p.banned ? "unban" : "ban"}" data-id="${esc(p.id)}">${p.banned ? "Unban" : "Ban"}</button></div></div>`);
   },
   async Rounds(){
     const d = await call("/api/admin/rounds");
@@ -89,11 +100,16 @@ const views = {
   },
   async Game(){
     const d = await call("/api/admin/game");
-    return `<div class="grid"><div class="card"><b>${esc(d.status)}</b><span>Round ${esc(d.round)}</span></div>
-      <div class="card"><b>${esc(d.stake)}</b><span>Stake (birr)</span></div>
+    return `<div class="grid"><div class="card"><b>${d.paused ? "Paused" : esc(d.status)}</b><span>Round ${esc(d.round)}</span></div>
+      <div class="card"><b>${esc(d.stake)}</b><span>Stake this round (birr)</span></div>
       <div class="card"><b>${esc(d.players)}</b><span>Players</span></div>
       <div class="card"><b>${esc(d.cards)}</b><span>Cards</span></div></div>
-      <div class="row"><div class="acts"><button class="ok" data-a="game-start">Start round (if idle)</button><button class="bad" data-a="game-stop">Cancel round and refund</button></div></div>`;
+      <div class="row"><div class="acts">${d.paused ? '<button class="ok" data-a="resume">Resume game</button>' : '<button class="bad" data-a="pause">Pause new rounds</button>'}<button data-a="game-start">Start round (if idle)</button><button class="bad" data-a="game-stop">Cancel round and refund</button></div></div>
+      <div class="row"><div class="acts"><input id="stake" type="number" min="1" step="any" value="${esc(d.next_stake)}" style="width:110px"><button class="pri" data-a="save-stake">Save stake</button></div><small>Stake for new rounds (birr). The current round keeps its stake.</small></div>`;
+  },
+  async Log(){
+    const d = await call("/api/admin/log");
+    return list(d.items, x => `<div class="row"><div><b>${esc(x.action)}</b><small>${esc(x.detail)}</small></div><small style="text-align:right">${esc(new Date(x.ts).toLocaleString())}<br>${x.actor === "password" ? "password" : "admin " + esc(x.actor)}</small></div>`);
   }
 };
 
@@ -107,14 +123,25 @@ async function show(){
 $("tabs").onclick = e => { const t=e.target.dataset.t; if(t){ tab=t; show(); } };
 $("view").onclick = async e => {
   const a=e.target.dataset.a; if(!a) return;
+  const id = Number(e.target.dataset.id);
   try {
+    if(a==="search"){ q=$("q").value.trim(); return show(); }
     if(a==="approve"||a==="reject"){
-      const r = await call("/api/admin/"+a, {id:Number(e.target.dataset.id), type:e.target.dataset.type});
+      const r = await call("/api/admin/"+a, {id, type:e.target.dataset.type});
       if(r.ok===false){ say("Already processed.", "err"); setTimeout(show, 800); return; }
+    } else if(a==="add"||a==="remove"){
+      const v = Number($("amt-"+id).value); if(!(v>0)) return say("Enter an amount in birr.", "err");
+      await call("/api/admin/adjust", {id, amount: a==="add" ? v : -v});
+    } else if(a==="ban"||a==="unban"){ await call("/api/admin/"+a, {id});
+    } else if(a==="save-stake"){
+      const v = Number($("stake").value); if(!(v>=1)) return say("Enter a stake of at least 1 birr.", "err");
+      await call("/api/admin/set-stake", {stake:v});
+    } else if(a==="pause"||a==="resume"){ await call("/api/admin/pause", {paused: a==="pause"});
     } else await call("/api/admin/"+a, {});
     say("Done.", "good"); setTimeout(show, 600);
   } catch(err){ say(err.message, "err"); }
 };
+$("view").addEventListener("keydown", e => { if(e.target.id==="q" && e.key==="Enter"){ q=e.target.value.trim(); show(); } });
 $("go").onclick = async () => {
   key = $("key").value.trim(); if(!key) return say("Enter the admin password.", "err");
   try { await call("/api/admin/overview"); sessionStorage.setItem("ak", key); $("login").hidden=true; $("app").hidden=false; show(); }
