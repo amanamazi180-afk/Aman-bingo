@@ -61,7 +61,35 @@ const say = async (env, chat, text, kb) => { // the Admin button is added only f
   if (kb && kb[0] && kb[0][0] && kb[0][0].web_app && await isAdmin(env, chat)) kb = [...kb, [{ text: 'Admin 🛠', web_app: { url: adminUrl(env) } }]];
   return tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: kb ? { inline_keyboard: kb } : undefined });
 };
-const playKb = env => [[{ text: 'Play 🎮', web_app: { url: env.GAME_URL } }]];
+const playKb = env => [[{ text: '🎮 ተጫወት', web_app: { url: env.GAME_URL } }]];
+
+/* ---------- bot menu (bottom keyboard) and Amharic texts ---------- */
+const SUPPORT = '@Amanbing2';
+const BTN = { play: '🎮 ጨዋታ ተጫወት', dep: '💰 ገንዘብ አስገባ', bal: '💳 ቀሪ ሂሳብ', sup: '🆘 እርዳታ' };
+const sendTo = (env, chat, text, markup) => tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: markup });
+const SHARE_KB = { keyboard: [[{ text: '📱 ስልክ ቁጥሬን አጋራ', request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
+const mainKbFor = async (env, id) => { // the 4 bottom buttons (admins also get an Admin button)
+  const rows = [[{ text: BTN.play, web_app: { url: env.GAME_URL } }], [{ text: BTN.dep }, { text: BTN.bal }], [{ text: BTN.sup }]];
+  if (await isAdmin(env, id)) rows.push([{ text: 'Admin 🛠', web_app: { url: adminUrl(env) } }]);
+  return { keyboard: rows, resize_keyboard: true, is_persistent: true };
+};
+const askContact = (env, uid) => sendTo(env, uid, '👋 እንኳን ወደ አማን ቢንጎ በደህና መጡ!\n\nለመመዝገብ ከታች ያለውን «📱 ስልክ ቁጥሬን አጋራ» ቁልፍ ይጫኑ።' + (welcomeC(env) > 0 ? `\n🎁 ሲመዘገቡ ${B(welcomeC(env))} ብር ስጦታ ያገኛሉ!` : ''), SHARE_KB);
+const depositInfo = `💰 ገንዘብ ለማስገባት (ቢያንስ ${MIN_DEP} ብር)፦\n\n📱 Telebirr: 0958828304 (AMANUEL)\n🏦 BOA: 266199511 (AMANUEL YISMAH)\n🏦 Dashen: 5901914597011 (AMANUEL YISMAH)\n\nገንዘቡን ከላኩ በኋላ ጨዋታውን ከፍተው «ዋሌት» ውስጥ «Deposit» ን ተጭነው የግብይት ቁጥር (Transaction ID) ያስገቡ።`;
+async function onContact(env, m) { // the player shared their phone number: register and give the welcome bonus
+  const db = env.DB, uid = m.from.id, c = m.contact, now = Date.now();
+  if (c.user_id && Number(c.user_id) !== Number(uid)) return sendTo(env, uid, '⚠️ እባክዎ የራስዎን ስልክ ቁጥር ብቻ ያጋሩ።', SHARE_KB);
+  const ph = normPhone(c.phone_number);
+  if (!ph) return sendTo(env, uid, '⚠️ ይህ ስልክ ቁጥር ትክክል አይደለም። የኢትዮጵያ ቁጥር (09… ወይም 07…) ያስፈልጋል።', SHARE_KB);
+  const nm = String(c.first_name || m.from.first_name || 'player').trim().slice(0, 30) || 'player';
+  await db.prepare('INSERT INTO users(id,name,created_ts) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').bind(uid, nm, now).run();
+  const u = await db.prepare('SELECT phone FROM users WHERE id=?').bind(uid).first();
+  if (u && u.phone) return sendTo(env, uid, '✅ አስቀድመው ተመዝግበዋል። ለመጫወት «' + BTN.play + '» ይጫኑ።', await mainKbFor(env, uid));
+  let ok = false;
+  try { ok = (await db.prepare("UPDATE users SET name=?1,phone=?2,balance=balance+?3 WHERE id=?4 AND (phone IS NULL OR phone='')").bind(nm, ph, welcomeC(env), uid).run()).meta.changes > 0 }
+  catch (e) { return sendTo(env, uid, `⚠️ ይህ ስልክ ቁጥር በሌላ አካውንት ተመዝግቧል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`, SHARE_KB) }
+  if (!ok) return sendTo(env, uid, '✅ አስቀድመው ተመዝግበዋል።', await mainKbFor(env, uid));
+  return sendTo(env, uid, '🎉 እንኳን ደስ አለዎት! በተሳካ ሁኔታ ተመዝግበዋል።' + (welcomeC(env) > 0 ? `\n🎁 ${B(welcomeC(env))} ብር የእንኳን ደህና መጡ ስጦታ ወደ ዋሌትዎ ተጨምሯል።` : '') + '\n\nለመጫወት «' + BTN.play + '» ይጫኑ።', await mainKbFor(env, uid));
+}
 
 /* ---------- money operations (each is one atomic batch) ---------- */
 async function tryMatch(env, txid) { // credit a pending deposit when a matching unclaimed SMS exists
@@ -70,7 +98,7 @@ async function tryMatch(env, txid) { // credit a pending deposit when a matching
     db.prepare("UPDATE users SET balance=balance+(SELECT d.amount_c FROM deposits d WHERE d.txid=?1) WHERE id=(SELECT d.user_id FROM deposits d JOIN sms_log s ON s.txid=d.txid WHERE d.txid=?1 AND d.status='pending' AND s.claimed=0 AND s.amount_c=d.amount_c)").bind(txid),
     db.prepare("UPDATE deposits SET status='approved',note='auto' WHERE txid=?1 AND status='pending' AND EXISTS(SELECT 1 FROM sms_log s WHERE s.txid=?1 AND s.claimed=0 AND s.amount_c=deposits.amount_c)").bind(txid),
     db.prepare("UPDATE sms_log SET claimed=1 WHERE txid=?1 AND claimed=0 AND EXISTS(SELECT 1 FROM deposits d WHERE d.txid=?1 AND d.status='approved')").bind(txid)]);
-  if (r[1].meta.changes > 0) { const d = await db.prepare('SELECT user_id,amount_c FROM deposits WHERE txid=?').bind(txid).first(); say(env, d.user_id, `✅ Deposit of ${B(d.amount_c)} birr received.`, playKb(env)); return true }
+  if (r[1].meta.changes > 0) { const d = await db.prepare('SELECT user_id,amount_c FROM deposits WHERE txid=?').bind(txid).first(); say(env, d.user_id, `✅ የ${B(d.amount_c)} ብር ገቢዎ ተቀብለናል።`, playKb(env)); return true }
   return false;
 }
 async function decideDeposit(env, id, ok) {
@@ -80,7 +108,7 @@ async function decideDeposit(env, id, ok) {
     db.prepare("UPDATE deposits SET status='approved',note='admin' WHERE id=?1 AND status='pending'").bind(id)
   ] : [db.prepare("UPDATE deposits SET status='rejected',note='admin' WHERE id=?1 AND status='pending'").bind(id)]);
   const done = r[r.length - 1].meta.changes > 0;
-  if (done) { const d = await db.prepare('SELECT user_id,amount_c FROM deposits WHERE id=?').bind(id).first(); say(env, d.user_id, ok ? `✅ Deposit of ${B(d.amount_c)} birr approved.` : '❌ Your deposit was rejected. Contact support.', ok ? playKb(env) : undefined) }
+  if (done) { const d = await db.prepare('SELECT user_id,amount_c FROM deposits WHERE id=?').bind(id).first(); say(env, d.user_id, ok ? `✅ የ${B(d.amount_c)} ብር ገቢዎ ጸድቋል።` : `❌ ገቢዎ ውድቅ ተደርጓል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`, ok ? playKb(env) : undefined) }
   return done;
 }
 async function decideWithdraw(env, id, paid) {
@@ -89,7 +117,7 @@ async function decideWithdraw(env, id, paid) {
     db.prepare("UPDATE users SET balance=balance+(SELECT amount_c FROM withdrawals WHERE id=?1 AND status='pending') WHERE id=(SELECT user_id FROM withdrawals WHERE id=?1 AND status='pending')").bind(id),
     db.prepare("UPDATE withdrawals SET status='rejected' WHERE id=?1 AND status='pending'").bind(id)]);
   const done = r[r.length - 1].meta.changes > 0;
-  if (done) { const w = await db.prepare('SELECT user_id,amount_c FROM withdrawals WHERE id=?').bind(id).first(); say(env, w.user_id, paid ? `✅ ${B(w.amount_c)} birr was sent to you.` : `↩️ Withdrawal rejected — ${B(w.amount_c)} birr returned to your balance.`) }
+  if (done) { const w = await db.prepare('SELECT user_id,amount_c FROM withdrawals WHERE id=?').bind(id).first(); say(env, w.user_id, paid ? `✅ ${B(w.amount_c)} ብር ተልኮልዎታል።` : `↩️ የማውጣት ጥያቄዎ ውድቅ ተደርጓል — ${B(w.amount_c)} ብር ወደ ቀሪ ሂሳብዎ ተመልሷል።`) }
   return done;
 }
 
@@ -171,9 +199,14 @@ async function onTelegram(env, up) {
     await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: ok ? 'Done' : 'Already processed' });
     return tg(env, 'editMessageText', { chat_id: q.message.chat.id, message_id: q.message.message_id, text: q.message.text + (ok ? '\n\n✔ Done' : '\n\n(already processed)') });
   }
-  const m = up.message; if (!m || !m.text) return;
-  const cmd = m.text.split(/[\s@]/)[0].toLowerCase(), uid = m.from.id; await refreshBonus(env, uid, Date.now()); const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(uid).first();
-  if (cmd === '/balance') return say(env, uid, u ? `Balance: ${B(u.balance)} birr · Daily bonus: ${B(u.bonus_c)} birr` : 'Open the game to register first.', playKb(env));
+  const m = up.message; if (!m) return;
+  if (m.contact) return onContact(env, m); // player shared their phone number
+  if (!m.text) return;
+  const text = m.text.trim(), cmd = text.split(/[\s@]/)[0].toLowerCase(), uid = m.from.id; await refreshBonus(env, uid, Date.now()); const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(uid).first();
+  if (cmd === '/balance' || text === BTN.bal) {
+    if (!u || !u.phone) return askContact(env, uid);
+    return sendTo(env, uid, `💳 ቀሪ ሂሳብዎ: ${B(u.balance)} ብር` + (u.bonus_c > 0 ? `\n🎁 ቦነስ: ${B(u.bonus_c)} ብር` : ''), await mainKbFor(env, uid));
+  }
   if (isOwner(env, uid) && (cmd === '/addadmin' || cmd === '/removeadmin' || cmd === '/admins')) {
     const list = await admins(env), id = (m.text.split(/\s+/)[1] || '').replace(/\D/g, '');
     if (cmd === '/admins') return say(env, uid, 'Admins:\n' + list.join('\n'));
@@ -190,8 +223,12 @@ async function onTelegram(env, up) {
     return;
   }
   if (cmd === '/admin' && await isAdmin(env, uid)) return tg(env, 'sendMessage', { chat_id: uid, text: 'Admin dashboard', reply_markup: { inline_keyboard: [[{ text: 'Open admin 🛠', web_app: { url: adminUrl(env) } }]] } });
-  const hint = { '/register': 'register', '/deposit': 'deposit', '/withdraw': 'withdraw', '/transfer': 'transfer', '/invite': 'invite friends', '/instruction': 'read the instructions', '/support': 'contact support' }[cmd];
-  return say(env, uid, hint ? `Open the game to ${hint}.` : 'Welcome to Aman Bingo! Tap Play to start.', playKb(env));
+  if (!u || !u.phone) return askContact(env, uid); // new player: must share the phone number first
+  const kb = await mainKbFor(env, uid);
+  if (text === BTN.dep || cmd === '/deposit') return sendTo(env, uid, depositInfo, kb);
+  if (text === BTN.sup || cmd === '/support') return sendTo(env, uid, `🆘 ለእርዳታ ያነጋግሩን: ${SUPPORT}`, kb);
+  if (cmd === '/withdraw') return sendTo(env, uid, '💸 ገንዘብ ለማውጣት ጨዋታውን ከፍተው «ዋሌት» ውስጥ «Withdraw» ን ይጫኑ።', kb);
+  return sendTo(env, uid, '🎮 እንኳን ደህና መጡ! ለመጫወት «' + BTN.play + '» ይጫኑ።', kb);
 }
 const depositText = x => `💰 Deposit #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr via ${x.method}\nTransaction: ${x.txid}\nNo matching SMS yet — approve only if the money arrived.`;
 const notifyAdmins = async (env, text, kb) => Promise.all((await admins(env)).map(a => say(env, a, text, kb)));
@@ -248,7 +285,7 @@ async function adminRoute(req, env, url) {
     if (!(id > 0) || !isFinite(amt) || amt === 0 || Math.abs(amt) > 100000) return J({ error: 'bad_input' }, 400);
     try { const r = await db.prepare('UPDATE users SET balance=balance+?1 WHERE id=?2').bind(C(amt), id).run(); if (!r.meta.changes) return J({ error: 'no_player' }, 409) } catch (e) { return J({ error: 'insufficient_balance' }, 409) }
     await log(amt > 0 ? 'add balance' : 'remove balance', 'player ' + id + ' ' + amt + ' birr');
-    say(env, id, amt > 0 ? `✅ ${amt} birr was added to your balance.` : `ℹ️ ${-amt} birr was removed from your balance by an admin.`);
+    say(env, id, amt > 0 ? `✅ ${amt} ብር ወደ ቀሪ ሂሳብዎ ተጨምሯል።` : `ℹ️ ${-amt} ብር ከቀሪ ሂሳብዎ በአስተዳዳሪ ተቀንሷል።`);
     return J({ ok: true, balance: B((await db.prepare('SELECT balance FROM users WHERE id=?').bind(id).first()).balance) });
   }
   if (name === 'ban' || name === 'unban') {
@@ -310,7 +347,7 @@ async function route(req, env, url) {
   if (p === '/api/me') { const dep = (await db.prepare('SELECT amount_c,status,ts FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results, wd = (await db.prepare('SELECT amount_c,status,ts FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results; return J({ id: u.id, name: u.name, phone: u.phone, registered: !!u.phone, balance: B(u.balance), bonus: B(u.bonus_c), deposits: dep.map(x => ({ ...x, amount: B(x.amount_c) })), withdrawals: wd.map(x => ({ ...x, amount: B(x.amount_c) })) }) }
   if (p === '/api/register') { if (u.phone) return J({ error: 'already_registered' }, 409); const ph = normPhone(b.phone), nm = String(b.name || '').trim().slice(0, 30); if (!ph || nm.length < 2) return J({ error: 'bad_input' }, 400);
     try { const rr = await db.prepare("UPDATE users SET name=?1,phone=?2,balance=balance+?3 WHERE id=?4 AND (phone IS NULL OR phone='')").bind(nm, ph, welcomeC(env), u.id).run(); if (!rr.meta.changes) return J({ error: 'already_registered' }, 409) } catch (e) { return J({ error: 'phone_used' }, 409) }
-    if (welcomeC(env) > 0) await say(env, u.id, `🎉 Congratulations! Welcome to Aman Bingo. ${B(welcomeC(env))} birr was added to your wallet.`, playKb(env));
+    if (welcomeC(env) > 0) await say(env, u.id, `🎉 እንኳን ደስ አለዎት! በተሳካ ሁኔታ ተመዝግበዋል። ${B(welcomeC(env))} ብር ወደ ዋሌትዎ ተጨምሯል።`, playKb(env));
     return J({ ok: true }) }
   if (p === '/api/state') return J(await stateFor(env, u));
   if (p === '/api/leaderboard') return J(await leaderboard(env, u, url.searchParams.get('period')));
