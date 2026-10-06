@@ -21,7 +21,7 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
 .card b{display:block;font-size:22px;color:var(--gold)}.card span{color:var(--mut);font-size:13px}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
-.row small{color:var(--mut);display:block}
+.row small{color:var(--mut);display:block;word-break:break-all}
 .row .acts{display:flex;gap:6px}
 #msg{margin:10px 0;padding:10px;border-radius:8px;display:none}
 #msg.err{display:block;background:#3a1b1a;border:1px solid var(--bad)}
@@ -68,13 +68,13 @@ function list(items, fn){ return items && items.length ? items.map(fn).join("") 
 const views = {
   async Overview(){
     const d = await call("/api/admin/overview");
-    const stats = [["Players",d.players],["Deposits (birr)",d.deposits],["Withdrawals (birr)",d.withdrawals],["Pending requests",d.pending],["Rounds played",d.rounds]];
+    const stats = [["Players",d.players],["Deposits (birr)",d.deposits],["Withdrawals paid (birr)",d.withdrawals],["Player balances (birr)",d.held],["Pending requests",d.pending],["Rounds played",d.rounds]];
     return '<div class="grid">' + stats.map(([l,v])=>`<div class="card"><b>${esc(v ?? 0)}</b><span>${l}</span></div>`).join("") + "</div>";
   },
   async Pending(){
     const d = await call("/api/admin/pending");
-    return list(d.items, p => `<div class="row"><div><b>${esc(p.type)} ${esc(p.amount)} birr</b><small>${esc(p.name)} · ${esc(p.phone)}</small></div>
-      <div class="acts"><button class="ok" data-a="approve" data-id="${esc(p.id)}">Approve</button><button class="bad" data-a="reject" data-id="${esc(p.id)}">Reject</button></div></div>`);
+    return list(d.items, p => `<div class="row"><div><b>${esc(p.type)} ${esc(p.amount)} birr</b><small>${esc(p.name)} · ${esc(p.phone)}</small><small>${esc(p.detail)}</small></div>
+      <div class="acts"><button class="ok" data-a="approve" data-type="${esc(p.type)}" data-id="${esc(p.id)}">${p.type==="withdraw"?"Mark paid":"Approve"}</button><button class="bad" data-a="reject" data-type="${esc(p.type)}" data-id="${esc(p.id)}">Reject</button></div></div>`);
   },
   async Players(){
     const d = await call("/api/admin/players");
@@ -86,8 +86,11 @@ const views = {
   },
   async Game(){
     const d = await call("/api/admin/game");
-    return `<div class="card"><b>${esc(d.status || "unknown")}</b><span>Current game</span></div>
-      <div class="row"><div class="acts"><button class="ok" data-a="game-start">Start round</button><button class="bad" data-a="game-stop">Stop round</button></div></div>`;
+    return `<div class="grid"><div class="card"><b>${esc(d.status)}</b><span>Round ${esc(d.round)}</span></div>
+      <div class="card"><b>${esc(d.stake)}</b><span>Stake (birr)</span></div>
+      <div class="card"><b>${esc(d.players)}</b><span>Players</span></div>
+      <div class="card"><b>${esc(d.cards)}</b><span>Cards</span></div></div>
+      <div class="row"><div class="acts"><button class="ok" data-a="game-start">Start round (if idle)</button><button class="bad" data-a="game-stop">Cancel round and refund</button></div></div>`;
   }
 };
 
@@ -102,8 +105,10 @@ $("tabs").onclick = e => { const t=e.target.dataset.t; if(t){ tab=t; show(); } }
 $("view").onclick = async e => {
   const a=e.target.dataset.a; if(!a) return;
   try {
-    if(a==="approve"||a==="reject") await call("/api/admin/"+a, {id:e.target.dataset.id});
-    else await call("/api/admin/"+a);
+    if(a==="approve"||a==="reject"){
+      const r = await call("/api/admin/"+a, {id:Number(e.target.dataset.id), type:e.target.dataset.type});
+      if(r.ok===false){ say("Already processed.", "err"); setTimeout(show, 800); return; }
+    } else await call("/api/admin/"+a, {});
     say("Done.", "good"); setTimeout(show, 600);
   } catch(err){ say(err.message, "err"); }
 };
