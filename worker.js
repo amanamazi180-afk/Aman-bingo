@@ -46,9 +46,16 @@ export async function verifyInit(initData, token, maxAge = 86400) {
   try { return JSON.parse(p.get('user')) } catch (e) { return null }
 }
 const tg = (env, method, body) => fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => { });
+// Owners come from the ADMIN_TG_ID secret (can hold several ids: 111,222). Extra admins live in the database and are managed with /addadmin /removeadmin /admins.
+const owners = env => String(env.ADMIN_TG_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+let adminsReady = false;
+const dbAdmins = async env => { try { if (!adminsReady) { await env.DB.prepare('CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY,added_ts INTEGER)').run(); adminsReady = true } return (await env.DB.prepare('SELECT id FROM admins').all()).results.map(r => String(r.id)) } catch (e) { return [] } };
+const admins = async env => [...new Set([...owners(env), ...await dbAdmins(env)])];
+const isOwner = (env, id) => owners(env).includes(String(id));
+const isAdmin = async (env, id) => isOwner(env, id) || (await dbAdmins(env)).includes(String(id));
 const adminUrl = env => env.ADMIN_URL || 'https://amanamazi180-afk.github.io/Aman-bingo/admin.html';
-const say = (env, chat, text, kb) => { // the Admin button is added only for the admin's own chat
-  if (kb && String(chat) === String(env.ADMIN_TG_ID) && kb[0] && kb[0][0] && kb[0][0].web_app) kb = [...kb, [{ text: 'Admin 🛠', web_app: { url: adminUrl(env) } }]];
+const say = async (env, chat, text, kb) => { // the Admin button is added only for an admin's own chat
+  if (kb && kb[0] && kb[0][0] && kb[0][0].web_app && await isAdmin(env, chat)) kb = [...kb, [{ text: 'Admin 🛠', web_app: { url: adminUrl(env) } }]];
   return tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: kb ? { inline_keyboard: kb } : undefined });
 };
 const playKb = env => [[{ text: 'Play 🎮', web_app: { url: env.GAME_URL } }]];
@@ -139,10 +146,10 @@ async function leaderboard(env, u, period) {
 
 /* ---------- Telegram bot (commands + admin buttons) ---------- */
 async function onTelegram(env, up) {
-  const db = env.DB, admin = String(env.ADMIN_TG_ID);
+  const db = env.DB;
   if (up.callback_query) {
     const q = up.callback_query, [a, id] = String(q.data).split(':');
-    if (String(q.from.id) !== admin) return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: 'Admin only' });
+    if (!(await isAdmin(env, q.from.id))) return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: 'Admin only' });
     const ok = a === 'da' ? await decideDeposit(env, +id, true) : a === 'dr' ? await decideDeposit(env, +id, false) : a === 'wp' ? await decideWithdraw(env, +id, true) : a === 'wr' ? await decideWithdraw(env, +id, false) : false;
     await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: ok ? 'Done' : 'Already processed' });
     return tg(env, 'editMessageText', { chat_id: q.message.chat.id, message_id: q.message.message_id, text: q.message.text + (ok ? '\n\n✔ Done' : '\n\n(already processed)') });
@@ -150,25 +157,34 @@ async function onTelegram(env, up) {
   const m = up.message; if (!m || !m.text) return;
   const cmd = m.text.split(/[\s@]/)[0].toLowerCase(), uid = m.from.id; await refreshBonus(env, uid, Date.now()); const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(uid).first();
   if (cmd === '/balance') return say(env, uid, u ? `Balance: ${B(u.balance)} birr · Daily bonus: ${B(u.bonus_c)} birr` : 'Open the game to register first.', playKb(env));
-  if (cmd === '/pending' && String(uid) === admin) {
+  if (isOwner(env, uid) && (cmd === '/addadmin' || cmd === '/removeadmin' || cmd === '/admins')) {
+    const list = await admins(env), id = (m.text.split(/\s+/)[1] || '').replace(/\D/g, '');
+    if (cmd === '/admins') return say(env, uid, 'Admins:\n' + list.join('\n'));
+    if (!id) return say(env, uid, 'Send it like this: ' + cmd + ' 123456789');
+    if (cmd === '/addadmin') { await db.prepare('INSERT OR IGNORE INTO admins(id,added_ts) VALUES(?,?)').bind(Number(id), Date.now()).run(); await say(env, id, 'You are now an admin. Send /admin to open the dashboard.'); return say(env, uid, '✅ Added admin ' + id) }
+    if (isOwner(env, id)) return say(env, uid, 'Owners can only be changed in Cloudflare.');
+    await db.prepare('DELETE FROM admins WHERE id=?').bind(Number(id)).run(); return say(env, uid, '✅ Removed admin ' + id);
+  }
+  if (cmd === '/pending' && await isAdmin(env, uid)) {
     const d = (await db.prepare("SELECT d.*,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending'").all()).results, w = (await db.prepare("SELECT w.*,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status='pending'").all()).results;
     if (!d.length && !w.length) return say(env, uid, 'Nothing pending ✅');
     for (const x of d) await say(env, uid, depositText(x), [[{ text: '✅ Approve', callback_data: 'da:' + x.id }, { text: '❌ Reject', callback_data: 'dr:' + x.id }]]);
     for (const x of w) await say(env, uid, withdrawText(x), [[{ text: '💸 Mark paid', callback_data: 'wp:' + x.id }, { text: '↩️ Reject', callback_data: 'wr:' + x.id }]]);
     return;
   }
-  if (cmd === '/admin' && String(uid) === admin) return tg(env, 'sendMessage', { chat_id: uid, text: 'Admin dashboard', reply_markup: { inline_keyboard: [[{ text: 'Open admin 🛠', web_app: { url: adminUrl(env) } }]] } });
+  if (cmd === '/admin' && await isAdmin(env, uid)) return tg(env, 'sendMessage', { chat_id: uid, text: 'Admin dashboard', reply_markup: { inline_keyboard: [[{ text: 'Open admin 🛠', web_app: { url: adminUrl(env) } }]] } });
   const hint = { '/register': 'register', '/deposit': 'deposit', '/withdraw': 'withdraw', '/transfer': 'transfer', '/invite': 'invite friends', '/instruction': 'read the instructions', '/support': 'contact support' }[cmd];
   return say(env, uid, hint ? `Open the game to ${hint}.` : 'Welcome to Aman Bingo! Tap Play to start.', playKb(env));
 }
 const depositText = x => `💰 Deposit #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr via ${x.method}\nTransaction: ${x.txid}\nNo matching SMS yet — approve only if the money arrived.`;
+const notifyAdmins = async (env, text, kb) => Promise.all((await admins(env)).map(a => say(env, a, text, kb)));
 const withdrawText = x => `💸 Withdrawal #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr\nSend to: ${x.method} ${x.account}`;
 
 /* ---------- admin dashboard routes (password = ADMIN_KEY secret, header X-Admin-Key) ---------- */
 async function adminRoute(req, env, url) {
   const key = req.headers.get('x-admin-key');
   let allowed = !!env.ADMIN_KEY && key === env.ADMIN_KEY;
-  if (!allowed) { const tu = await verifyInit(req.headers.get('x-init-data'), env.BOT_TOKEN); allowed = !!tu && String(tu.id) === String(env.ADMIN_TG_ID); } // opened from the admin's own Telegram account
+  if (!allowed) { const tu = await verifyInit(req.headers.get('x-init-data'), env.BOT_TOKEN); allowed = !!tu && await isAdmin(env, tu.id); } // opened from the admin's own Telegram account
   if (!allowed) return J({ error: 'forbidden' }, 403);
   const db = env.DB, name = url.pathname.replace('/api/admin/', '');
   const b = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
@@ -266,7 +282,7 @@ async function route(req, env, url) {
     if (!(amt >= MIN_DEP) || txid.length < 8 || txid.length > 14) return J({ error: 'bad_input', min: MIN_DEP }, 400);
     let id; try { id = (await db.prepare('INSERT INTO deposits(user_id,txid,amount_c,method,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, txid, C(amt), method, 'pending', now).run()).meta.last_row_id } catch (e) { return J({ error: 'txid_used' }, 409) }
     const ok = method === 'telebirr' && await tryMatch(env, txid);
-    if (!ok) await say(env, env.ADMIN_TG_ID, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid }), [[{ text: '✅ Approve', callback_data: 'da:' + id }, { text: '❌ Reject', callback_data: 'dr:' + id }]]);
+    if (!ok) await notifyAdmins(env, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid }), [[{ text: '✅ Approve', callback_data: 'da:' + id }, { text: '❌ Reject', callback_data: 'dr:' + id }]]);
     return J({ status: ok ? 'approved' : 'pending', balance: B((await db.prepare('SELECT balance FROM users WHERE id=?').bind(u.id).first()).balance) });
   }
   if (p === '/api/withdraw') {
@@ -274,7 +290,7 @@ async function route(req, env, url) {
     if (!(amt >= MIN_WD) || !account) return J({ error: 'bad_input', min: MIN_WD }, 400);
     if (!(await db.prepare("SELECT 1 x FROM deposits WHERE user_id=? AND status='approved' LIMIT 1").bind(u.id).first())) return J({ error: 'deposit_required' }, 403); // bonus-farming guard: deposit once before withdrawing
     let id; try { const r = await db.batch([db.prepare('UPDATE users SET balance=balance-?2 WHERE id=?1').bind(u.id, C(amt)), db.prepare('INSERT INTO withdrawals(user_id,amount_c,method,account,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, C(amt), method, account, 'pending', now)]); id = r[1].meta.last_row_id } catch (e) { return J({ error: errOf(e) }, 409) }
-    await say(env, env.ADMIN_TG_ID, withdrawText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, account }), [[{ text: '💸 Mark paid', callback_data: 'wp:' + id }, { text: '↩️ Reject', callback_data: 'wr:' + id }]]);
+    await notifyAdmins(env, withdrawText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, account }), [[{ text: '💸 Mark paid', callback_data: 'wp:' + id }, { text: '↩️ Reject', callback_data: 'wr:' + id }]]);
     return J({ status: 'pending' });
   }
   return J({ error: 'not_found' }, 404);
