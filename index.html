@@ -82,8 +82,9 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 </div>
 
 <div class="s" id="lobby">
+  <div class="pill t" style="flex:none;padding:10px"><small>DERASH</small><b id="lder" style="font-size:34px">0</b> <small style="display:inline">birr</small></div>
   <div class="row"><button class="gb" onclick="backHome()">← Back</button><div style="flex:1"></div><button class="gb" onclick="key='';tick()">⟳ Refresh</button></div>
-  <div class="row"><div class="pill"><small>MAIN WALLET</small><b id="lm">0</b></div><div class="pill"><small>PLAY WALLET</small><b id="lp">0</b></div><div class="pill"><small>STAKE</small><b id="ls">10</b></div><div class="pill t"><b id="lt">-</b></div></div>
+  <div class="row"><div class="pill"><small>MAIN WALLET</small><b id="lm">0</b></div><div class="pill"><small>PLAY WALLET</small><b id="lp">0</b></div><div class="pill"><small>STAKE</small><b id="ls">10</b></div><div class="pill"><small>PLAYERS</small><b id="lpl">0</b></div><div class="pill t"><b id="lt">-</b></div></div>
   <p class="hint">Tap numbers to pick your cartela (max 2). <span style="color:#18d98b">Green</span> = yours · <span style="color:#ff7a1a">orange</span> = taken</p>
   <div class="grid" id="grid"></div>
   <div class="prev" id="prev"></div>
@@ -176,9 +177,11 @@ function render(){
   if(r.status==="lobby"){$("win").classList.remove("on");show("lobby");drawLobby()}
   else{show("game");drawGame()}
 }
-function drawLobby(){
+  function drawLobby(){
   const r=S.round,left=Math.max(0,Math.ceil((r.start_ts+r.lobby_ms-(Date.now()+off))/1000));
   $("lt").textContent=left+"s";$("lm").textContent=F(S.balance);$("lp").textContent=F(S.bonus);$("ls").textContent=r.stake;
+  $("lder").textContent=F(S.taken.length*r.stake*0.8);
+  $("lpl").textContent=S.taken.length;
   const k=JSON.stringify([S.taken,S.mine]);if(k===key)return;key=k;
   let h="";for(let i=1;i<=400;i++)h+=`<div class="n${S.mine.includes(i)?" mine":S.taken.includes(i)?" tk":""}" onclick="pick(${i})">${i}</div>`;
   const g=$("grid"),sc=g.scrollTop;g.innerHTML=h;g.scrollTop=sc;
@@ -186,15 +189,23 @@ function drawLobby(){
 }
 async function pick(n){
   if(S.taken.includes(n)&&!S.mine.includes(n))return;
-  try{S=await api(S.mine.includes(n)?"/api/unpick":"/api/pick",{cartela:n});render();if(tg&&tg.HapticFeedback)tg.HapticFeedback.selectionChanged()}catch(e){toast(ERR[e]||e)}
+  const had=S.mine.includes(n);
+  if(!had&&S.mine.length>=2){toast(ERR.max_cards);return}
+  const bk=[S.mine.slice(),S.taken.slice()];
+  if(had){S.mine=S.mine.filter(x=>x!==n);S.taken=S.taken.filter(x=>x!==n)}
+  else{S.mine.push(n);S.taken.push(n)}
+  key="";drawLobby();
+  try{S=await api(had?"/api/unpick":"/api/pick",{cartela:n});key="";render();
+    if(tg&&tg.HapticFeedback)tg.HapticFeedback.selectionChanged()}
+  catch(e){S.mine=bk[0];S.taken=bk[1];key="";drawLobby();toast(ERR[e]||e)}
 }
 function buildBoard(){let h="";[..."BINGO"].forEach((l,i)=>h+=`<div class="hd" style="background:${CL[i]}">${l}</div>`);for(let r=1;r<=15;r++)for(let c=0;c<5;c++){const n=c*15+r;h+=`<div class="nn" id="b${n}">${n}</div>`}$("board").innerHTML=h}
 function drawGame(){
   const r=S.round,cl=S.called,n=cl[cl.length-1];
-  $("gid").textContent=r.id;$("gp").textContent=S.players;$("gbet").textContent=r.stake;$("gd").textContent=F(S.derash);$("gc").textContent=cl.length;
-  if(cl.length>lastN){lastN=cl.length;if(r.status==="running")playNum(n)}
   for(let i=1;i<=75;i++)$("b"+i).className="nn"+(i===n?" l":cl.includes(i)?" k":"");
   $("big").textContent=n?L(n)+"-"+n:"—";
+  $("gid").textContent=r.id;$("gp").textContent=(S.taken&&S.taken.length)?S.taken.length:S.players;$("gbet").textContent=r.stake;$("gd").textContent=F(S.derash);$("gc").textContent=cl.length;
+if(cl.length>lastN){lastN=cl.length;if(r.status==="running")playNum(n)}
   $("rec").innerHTML=cl.slice(-3).reverse().map(x=>`<span style="background:${CL[Math.floor((x-1)/15)]}">${L(x)}-${x}</span>`).join("");
   $("mycards").innerHTML=S.mine.length?S.mine.map(c=>`<div class="mc"><div class="cn">CARTELA #${c}</div>${cardHTML(c,cl,null,n)}</div>`).join(""):'<div style="text-align:center;padding:26px 6px"><b style="font-size:20px">WATCHING<br>ONLY</b><p class="hint" style="margin-top:10px">The next round starts soon. Wait here.</p></div>';
   const ab=$("act");if(S.mine.length){ab.textContent="AUTOMATIC";ab.style.cssText="background:var(--gr);color:#08301f;border-color:var(--gr)"}else{ab.textContent="WATCHING";ab.style.cssText="opacity:.5"}
