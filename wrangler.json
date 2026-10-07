@@ -13,6 +13,7 @@
     "GAME_URL": "https://amanamazi180-afk.github.io/Aman-bingo/",
     "ALLOW_ORIGIN": "https://amanamazi180-afk.github.io",
     "STAKE": "10",
-    "DAILY_BONUS": "10"
+    "DAILY_BONUS": "0",
+    "PROMO_PHOTO": "https://amanamazi180-afk.github.io/Aman-bingo/Promo%20pic.png"
   }
 }
