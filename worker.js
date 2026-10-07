@@ -68,9 +68,10 @@ const SUPPORT = '@Amanbing2';
 const BTN = { play: '🎮 ጨዋታ ተጫወት', dep: '💰 ገንዘብ አስገባ', bal: '💳 ቀሪ ሂሳብ', sup: '🆘 እርዳታ' };
 const sendTo = (env, chat, text, markup) => tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: markup });
 const SHARE_KB = { keyboard: [[{ text: '📱 ስልክ ቁጥሬን አጋራ', request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
-const mainKbFor = async (env, id) => { // the 4 bottom buttons (admins also get an Admin button)
-  const rows = [[{ text: BTN.play, web_app: { url: env.GAME_URL } }], [{ text: BTN.dep }, { text: BTN.bal }], [{ text: BTN.sup }]];
-  if (await isAdmin(env, id)) rows.push([{ text: 'Admin 🛠', web_app: { url: adminUrl(env) } }]);
+  
+const mainKbFor = async (env, id) => {
+  const rows = [[{ text: BTN.play }], [{ text: BTN.dep }, { text: BTN.bal }], [{ text: BTN.sup }]];
+  if (await isAdmin(env, id)) rows.push([{ text: 'Admin 🛠' }]);
   return { keyboard: rows, resize_keyboard: true, is_persistent: true };
 };
 const askContact = (env, uid) => sendTo(env, uid, '👋 እንኳን ወደ አማን ቢንጎ በደህና መጡ!\n\nለመመዝገብ ከታች ያለውን «📱 ስልክ ቁጥሬን አጋራ» ቁልፍ ይጫኑ።' + (welcomeC(env) > 0 ? `\n🎁 ሲመዘገቡ ${B(welcomeC(env))} ብር ስጦታ ያገኛሉ!` : ''), SHARE_KB);
@@ -222,9 +223,10 @@ async function onTelegram(env, up) {
     for (const x of w) await say(env, uid, withdrawText(x), [[{ text: '💸 Mark paid', callback_data: 'wp:' + x.id }, { text: '↩️ Reject', callback_data: 'wr:' + x.id }]]);
     return;
   }
-  if (cmd === '/admin' && await isAdmin(env, uid)) return tg(env, 'sendMessage', { chat_id: uid, text: 'Admin dashboard', reply_markup: { inline_keyboard: [[{ text: 'Open admin 🛠', web_app: { url: adminUrl(env) } }]] } });
+  if ((cmd === '/admin' || text === 'Admin 🛠') && await isAdmin(env, uid)) return tg(env, 'sendMessage', { chat_id: uid, text: 'Admin dashboard', reply_markup: { inline_keyboard: [[{ text: 'Open admin 🛠', web_app: { url: adminUrl(env) } }]] } });
   if (!u || !u.phone) return askContact(env, uid); // new player: must share the phone number first
   const kb = await mainKbFor(env, uid);
+   if (text === BTN.play || cmd === '/play') return sendTo(env, uid, '🎮 ለመጫወት ከታች ያለውን ቁልፍ ይጫኑ።', { inline_keyboard: playKb(env) });
   if (text === BTN.dep || cmd === '/deposit') return sendTo(env, uid, depositInfo, kb);
   if (text === BTN.sup || cmd === '/support') return sendTo(env, uid, `🆘 ለእርዳታ ያነጋግሩን: ${SUPPORT}`, kb);
   if (cmd === '/withdraw') return sendTo(env, uid, '💸 ገንዘብ ለማውጣት ጨዋታውን ከፍተው «ዋሌት» ውስጥ «Withdraw» ን ይጫኑ።', kb);
