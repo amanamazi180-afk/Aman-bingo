@@ -403,7 +403,7 @@ async function route(req, env, url) {
     let id; try { const r = await db.batch([db.prepare('UPDATE users SET balance=balance-?2 WHERE id=?1').bind(u.id, C(amt)), db.prepare('INSERT INTO withdrawals(user_id,amount_c,method,account,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, C(amt), method, account, 'pending', now)]); id = r[1].meta.last_row_id } catch (e) { return J({ error: errOf(e) }, 409) }
     await notifyAdmins(env, withdrawText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, account }), [[{ text: '💸 Mark paid', callback_data: 'wp:' + id }, { text: '↩️ Reject', callback_data: 'wr:' + id }]]);
     return J({ status: 'pending' });
-  }
+  }                              
   return J({ error: 'not_found' }, 404);
 }
 export default {
