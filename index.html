@@ -59,6 +59,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .bigb{min-width:88px;height:88px;border-radius:50%;background:#f4f8f9;color:#0b2a38;border:6px solid var(--or);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;padding:0 8px;white-space:nowrap}
 .auto{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;font-weight:800;letter-spacing:.08em;font-size:12px}
 .sw{width:46px;height:26px;border-radius:13px;background:var(--gr);position:relative}.sw:after{content:"";position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff}
+.sw.off{background:#3a4f5c}.sw.off:after{right:auto;left:3px}
 .cardsbox{flex:1;min-height:0;overflow-y:auto;padding:6px}
 .cardsbox .mc{padding:6px;margin-bottom:6px}.cardsbox .card .c{font-size:12px;aspect-ratio:1}.cardsbox .card .h{font-size:10px}
 .bar2{display:flex;gap:8px}.bar2 .gb{flex:1}
@@ -93,11 +94,11 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
     <div class="side">
       <div class="box recent"><div class="rec" id="rec"></div><button class="spk" id="sb" onclick="snd()">🔊</button></div>
       <div class="box bigbox"><div class="bigb" id="big">—</div></div>
-      <div class="box auto">AUTOMATIC <div class="sw"></div></div>
+      <div class="box auto" onclick="toggleAuto()">AUTOMATIC <div class="sw" id="sw"></div></div>
       <div class="box cardsbox"><div id="mycards"></div></div>
     </div>
   </div>
-  <div class="bar2"><button class="gb red" onclick="leaveGame()">LEAVE</button><button class="gb" onclick="tick()">REFRESH</button><button class="gb" id="act" disabled>WATCHING</button></div>
+  <div class="bar2"><button class="gb red" onclick="leaveGame()">LEAVE</button><button class="gb" onclick="tick()">REFRESH</button><button class="gb" id="act" onclick="claim()" disabled>WATCHING</button></div>
 </div>
 
 <div class="s" id="tab"><div id="tabc" style="display:flex;flex-direction:column;gap:8px"></div></div>
@@ -119,7 +120,7 @@ const API="https://aman-bingo.amanamazi180.workers.dev";
 const tg=window.Telegram&&Telegram.WebApp;if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#0b1f2a");tg.setBackgroundColor("#0b1f2a")}catch(e){}}
 const $=i=>document.getElementById(i),CL=["#4f8cff","#22b8cf","#34c38f","#f2b84b","#ef6a5b"];
 const L=n=>"BINGO"[Math.floor((n-1)/15)],F=n=>String(+Number(n).toFixed(2));
-const PAY={telebirr:{n:"Telebirr",a:"0958828304",h:"AMANUEL"},boa:{n:"BOA",a:"266199511",h:"AMANUEL YISMAH"},dashen:{n:"Dashen Bank",a:"5901914597011",h:"AMANUEL YISMAH"}};
+const PAY={telebirr:{n:"Telebirr",a:"0958828304",h:"AMANUEL"},cbe:{n:"CBE",a:"0958828304",h:"AMANUEL YISMAH"},boa:{n:"BOA",a:"266199511",h:"AMANUEL YISMAH"},dashen:{n:"Dashen Bank",a:"5901914597011",h:"AMANUEL YISMAH"}};
 const LG={telebirr:["#0a8fd8","T"],boa:["#c9a227","B"],dashen:["#1b4fa3","D"],cbe:["#7b2a7e","C"]};
 const ERR={no_api:"Server address is not set in index.html (API line)",not_registered:"Please register in the bot first (share your contact)",insufficient_balance:"Not enough balance - deposit first",round_closed:"Round already started",max_cards:"You can take only 2 cards",taken:"Card already taken",bad_input:"Check the numbers you entered",txid_used:"This transaction ID was already used",deposit_required:"Make a deposit before withdrawing",withdraw_pending:"You already have a pending withdrawal. Wait until it is approved.",unauthorized:"Open this game from the Telegram bot",server_error:"Server error, try again"};
 let ready=false,S=null,off=0,inGame=false,looping=false,snd_on=true,lastN=0,rid=0,key="",reg=false;
@@ -210,7 +211,10 @@ function drawGame(){
   if(cl.length>lastN){lastN=cl.length;if(r.status==="running")playNum(n)}
   $("rec").innerHTML=cl.slice(-3).reverse().map(x=>`<span style="background:${CL[Math.floor((x-1)/15)]}">${L(x)}-${x}</span>`).join("");
   $("mycards").innerHTML=S.mine.length?S.mine.map(c=>`<div class="mc"><div class="cn">CARTELA #${c}</div>${cardHTML(c,cl,null,n)}</div>`).join(""):'<div style="text-align:center;padding:26px 6px"><b style="font-size:20px">WATCHING<br>ONLY</b><p class="hint" style="margin-top:10px">The next round starts soon. Wait here.</p></div>';
-  const ab=$("act");if(S.mine.length){ab.textContent="AUTOMATIC";ab.style.cssText="background:var(--gr);color:var(--dk);border-color:var(--gr)"}else{ab.textContent="WATCHING";ab.style.cssText="opacity:.5"}
+   const ab=$("act");$("sw").className="sw"+(S.auto?"":" off");
+  if(!S.mine.length){ab.textContent="WATCHING";ab.disabled=true;ab.style.cssText="opacity:.5"}
+  else if(S.auto){ab.textContent="AUTOMATIC";ab.disabled=true;ab.style.cssText="background:var(--gr);color:var(--dk);border-color:var(--gr)"}
+  else{ab.textContent="BINGO";ab.disabled=false;ab.style.cssText="background:#d1400f;color:#fff;border:2px solid #f2b84b"}
   const ov=$("win");
   if(r.status==="ended"||r.status==="cancelled"){
     const sec=Math.max(0,Math.ceil((r.rest_ms-(Date.now()+off-r.ended_ts))/1000));ov.classList.add("on");
@@ -234,8 +238,8 @@ function wmSel(k){wsel=k;document.querySelectorAll(".mth").forEach(e=>e.classLis
 function pmSel(k){sel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="pm_"+k))}
 function wf(t){
   if(t==="w"&&pendW){$("wform").innerHTML='<div class="watch">⏳ You have a pending withdrawal.<br>Wait until it is approved before requesting another.</div>';return}
-  $("wform").innerHTML=t==="d"?Object.keys(PAY).map(k=>`<div class="mth" id="pm_${k}" onclick="pmSel('${k}')">${lg(k)}<div><b>${PAY[k].n}</b><span>${PAY[k].a}</span><small>${PAY[k].h}</small></div></div>`).join("")+`<input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="Amount (min 30 birr)"><input class="inp" id="fa2" placeholder="Transaction ID"><button class="gb" style="background:var(--gr);color:var(--dk)" onclick="dep()">Submit deposit</button>`
-  :Object.keys(WM).map(k=>`<div class="mth" id="wm_${k}" onclick="wmSel('${k}')">${lg(k)}<div><b>${WM[k]}</b><small>Receive here</small></div></div>`).join("")+`<input class="inp" id="fa2" placeholder="Your account number / phone"><input class="inp" id="fa3" placeholder="Account holder name"><input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="Amount (min 50 birr)"><button class="gb" onclick="wd()">Request withdrawal</button>`;
+  $("wform").innerHTML=t==="d"?Object.keys(PAY).map(k=>`<div class="mth" id="pm_${k}" onclick="pmSel('${k}')">${lg(k)}<div><b>${PAY[k].n}</b><span onclick="cp('${PAY[k].a}',event)">${PAY[k].a} 📋</span><small>${PAY[k].h}</small></div></div>`).join("")+`<input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="Amount (min 30 birr)"><input class="inp" id="fa2" placeholder="Transaction ID"><button class="gb" style="background:var(--gr);color:var(--dk)" onclick="dep()">Submit deposit</button>`
+ :Object.keys(WM).map(k=>`<div class="mth" id="wm_${k}" onclick="wmSel('${k}')">${lg(k)}<div><b>${WM[k]}</b><small>Receive here</small></div></div>`).join("")+`<input class="inp" id="fa2" placeholder="Your account number / phone"><input class="inp" id="fa3" placeholder="Account holder name"><input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="Amount (min 50 birr)"><button class="gb" onclick="wd()">Request withdrawal</button>`;
   if(t==="d")pmSel(sel);else wmSel(wsel)}
 async function openWallet(){show("wal");setNav(3);$("wform").innerHTML="";try{const me=await api("/api/me");$("wb").textContent=F(me.balance);$("wbn").textContent=F(me.bonus);pendW=me.withdrawals.some(x=>x.status==="pending");
   $("whist").innerHTML=hrows(me)}catch(e){toast(ERR[e]||e)}}
@@ -246,6 +250,9 @@ async function scoresPage(p){try{const d=await api("/api/leaderboard?period="+p)
   $("tabc").innerHTML=`<div class="li"><span>My rank</span><span>${me.rank?"#"+me.rank:"—"} · ${me.played||0} games</span></div><div class="row"><button class="gb" style="flex:1${p==="daily"?on:""}" onclick="scoresPage('daily')">DAILY</button><button class="gb" style="flex:1${p==="weekly"?on:""}" onclick="scoresPage('weekly')">WEEKLY</button></div><p class="hint">TOP 10 PLAYERS</p>`+(d.top||[]).map((r,i)=>`<div class="li"><span>${i+1}. ${esc(r[0])}</span><span>${r[1]} games</span></div>`).join("")}catch(e){toast(ERR[e]||e)}}
 async function histPage(){try{const me=await api("/api/me"),h=hrows(me);$("tabc").innerHTML=h||'<p class="hint">No history yet.</p>'}catch(e){toast(ERR[e]||e)}}
 async function profPage(){try{const me=await api("/api/me");$("tabc").innerHTML=`<div class="li"><span>Name</span><span>${esc(me.name)}</span></div><div class="li"><span>Telegram ID</span><span>${me.id}</span></div><div class="li"><span>Phone</span><span>${esc(me.phone||"-")}</span></div>`}catch(e){toast(ERR[e]||e)}}
+async function toggleAuto(){const a=!S.auto;S.auto=a;drawGame();try{await api("/api/auto",{auto:a})}catch(e){S.auto=!a;drawGame();toast(ERR[e]||e)}}
+async function claim(){try{S=await api("/api/bingo",{});off=S.now-Date.now();render()}catch(e){toast(e==="no_bingo"?"❌ No bingo yet":e==="round_over"?"Round already finished":(ERR[e]||e))}}
+function cp(t,e){if(e)e.stopPropagation();const ok=()=>toast("✅ Copied "+t);function fb(){const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();try{document.execCommand("copy");ok()}catch(x){}a.remove()}try{navigator.clipboard.writeText(t).then(ok,fb)}catch(x){fb()}}
 buildBoard();
 boot();
 </script></body></html>
