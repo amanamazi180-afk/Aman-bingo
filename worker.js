@@ -1,7 +1,8 @@
 // Aman Bingo server — Cloudflare Worker + D1 database.
 // Money is stored in cents (birr x 100). Variables to set in Cloudflare:
 //   BOT_TOKEN, ADMIN_TG_ID, SMS_SECRET, TG_SECRET, ADMIN_KEY (secrets) · GAME_URL, ALLOW_ORIGIN, STAKE (plain variables)
-const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 400, MIN_DEP = 30, MIN_WD = 50;
+//   Optional: CBE_ACCOUNT (e.g. "1000123456789 (AMANUEL YISMAH)" — the CBE button appears only when this is set), BOT_USERNAME, WELCOME_BONUS, DAILY_BONUS, ADMIN_URL, PROMO_PHOTO
+const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 400, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
 const welcomeC = env => C(env.WELCOME_BONUS ?? 10); // one-time gift when a player registers
 const bonusC = env => C(env.DAILY_BONUS ?? 0), // daily bonus is off unless DAILY_BONUS is set
@@ -36,6 +37,14 @@ export function parseSms(t) { // Telebirr "received" message
   if (!amt || !id || !/ተቀብለዋል/.test(t)) return null;
   return { amount_c: C(amt[1].replace(/,/g, '')), txid: id[1].toUpperCase() };
 }
+// finds the transaction number in a payment message the player pastes (Telebirr / CBE / BOA / Dashen)
+export function parsePaste(t) {
+  t = String(t || '');
+  const lab = t.match(/(?:transaction\s*(?:number|id|no\.?)|ref(?:erence)?(?:\s*(?:no\.?|number|id))?|receipt\s*(?:no\.?|number)|ቁጥርዎ|ቁጥር)\s*(?:is|:|-)?\s*([A-Z0-9]{8,14})\b/i);
+  if (lab && /\d/.test(lab[1]) && /[A-Z]/i.test(lab[1])) return { txid: lab[1].toUpperCase() };
+  const all = (t.toUpperCase().match(/\b[A-Z0-9]{8,14}\b/g) || []).filter(x => /\d/.test(x) && /[A-Z]/.test(x));
+  return all.length ? { txid: all[0] } : null;
+}
 export function normPhone(p) { p = String(p || '').replace(/[\s-]/g, ''); if (/^\+?251[79]\d{8}$/.test(p)) p = '0' + p.replace(/^\+?251/, ''); return /^0[79]\d{8}$/.test(p) ? p : null }
 
 /* ---------- Telegram helpers ---------- */
@@ -63,19 +72,38 @@ const say = async (env, chat, text, kb) => { // the Admin button is added only f
 };
 const playKb = env => [[{ text: '🎮 ተጫወት', web_app: { url: env.GAME_URL } }]];
 
-/* ---------- bot menu (bottom keyboard) and Amharic texts ---------- */
+/* ---------- bot menu (inline buttons, like DIL BINGO) and Amharic texts ---------- */
 const SUPPORT = '@Amanbing2';
-const BTN = { play: '🎮 ጨዋታ ተጫወት', dep: '💰 ገንዘብ አስገባ', bal: '💳 ቀሪ ሂሳብ', sup: '🆘 እርዳታ' };
+const BTN = { play: '🎮 ጨዋታ ተጫወት', dep: '💰 ገንዘብ አስገባ', bal: '💳 ቀሪ ሂሳብ', sup: '🆘 እርዳታ' }; // old bottom-keyboard texts, still understood
 const sendTo = (env, chat, text, markup) => tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: markup });
 const SHARE_KB = { keyboard: [[{ text: '📱 ስልክ ቁጥሬን አጋራ', request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
-  
-const mainKbFor = async (env, id) => {
-  const rows = [[{ text: BTN.play }], [{ text: BTN.dep }, { text: BTN.bal }], [{ text: BTN.sup }]];
-  if (await isAdmin(env, id)) rows.push([{ text: 'Admin 🛠' }]);
-  return { keyboard: rows, resize_keyboard: true, is_persistent: true };
-};
+const menuKb = env => [
+  [{ text: 'Play 🎮', web_app: { url: env.GAME_URL } }],
+  [{ text: 'Balance 💵', callback_data: 'm:bal' }, { text: 'Deposit 💰', callback_data: 'm:dep' }],
+  [{ text: 'Contact Support... 🆘', url: 'https://t.me/' + SUPPORT.slice(1) }, { text: 'Instruction 📖', callback_data: 'm:ins' }],
+  [{ text: 'Transfer 🎁', callback_data: 'm:tr' }, { text: 'Withdraw 🤑', callback_data: 'm:wd' }],
+  [{ text: 'Invite 🔗', callback_data: 'm:inv' }]];
+const sendMenu = (env, chat, text) => say(env, chat, text, menuKb(env));
 const askContact = (env, uid) => sendTo(env, uid, '👋 እንኳን ወደ አማን ቢንጎ በደህና መጡ!\n\nለመመዝገብ ከታች ያለውን «📱 ስልክ ቁጥሬን አጋራ» ቁልፍ ይጫኑ።' + (welcomeC(env) > 0 ? `\n🎁 ሲመዘገቡ ${B(welcomeC(env))} ብር ስጦታ ያገኛሉ!` : ''), SHARE_KB);
-const depositInfo = `💰 ገንዘብ ለማስገባት (ቢያንስ ${MIN_DEP} ብር)፦\n\n📱 Telebirr: 0958828304 (AMANUEL)\n🏦 BOA: 266199511 (AMANUEL YISMAH)\n🏦 Dashen: 5901914597011 (AMANUEL YISMAH)\n\nገንዘቡን ከላኩ በኋላ ጨዋታውን ከፍተው «ዋሌት» ውስጥ «Deposit» ን ተጭነው የግብይት ቁጥር (Transaction ID) ያስገቡ።`;
+const instructionText = `📖 እንዴት ይጫወታሉ?\n\n1️⃣ «Deposit» ን ተጭነው ገንዘብ ያስገቡ (ቢያንስ ${MIN_DEP} ብር)።\n2️⃣ «Play» ን ተጭነው ጨዋታውን ይክፈቱ።\n3️⃣ ከ1 እስከ ${TOTAL} ካርቴላ ይምረጡ — እስከ ${MAXC} ካርቴላ መያዝ ይቻላል።\n4️⃣ ቁጥሮች ሲጠሩ ካርዱ ላይ ምልክት ይደረጋል። መስመር (ወደጎን፣ ወደታች ወይም ዲያጎናል) የሞላ ካርቴላ ያሸንፋል።\n5️⃣ አሸናፊው ከጠቅላላው ድርሻ ${Math.round(CUT * 100)}% ያገኛል። ጨዋታ ለመጀመር ቢያንስ 2 ተጫዋች ያስፈልጋል።\n6️⃣ ለማውጣት «Withdraw» ን ይጫኑ (ቢያንስ ${MIN_WD} ብር)።\n\nጥያቄ ካለዎት: ${SUPPORT}`;
+
+// banks offered in the deposit / withdraw flows (the CBE button shows only when CBE_ACCOUNT is set)
+const BANKS = { telebirr: 'TELEBIRR', cbe: 'CBE BIRR', boa: 'BOA', dashen: 'DASHEN' };
+const banksFor = env => Object.keys(BANKS).filter(k => k !== 'cbe' || env.CBE_ACCOUNT);
+const bankKb = (env, flow) => {
+  const b = banksFor(env).map(k => ({ text: BANKS[k], callback_data: `b:${flow}:${k}` })), rows = [];
+  for (let i = 0; i < b.length; i += 2) rows.push(b.slice(i, i + 2));
+  rows.push([{ text: '❌ ሰርዝ (Cancel)', callback_data: 'b:x' }]);
+  return { inline_keyboard: rows };
+};
+const acctText = (env, k) => k === 'telebirr' ? '📱 Telebirr: 0958828304\n👤 Name: AMANUEL' : k === 'boa' ? '🏦 BOA: 266199511\n👤 Name: AMANUEL YISMAH' : k === 'dashen' ? '🏦 Dashen: 5901914597011\n👤 Name: AMANUEL YISMAH' : '🏦 CBE: ' + (env.CBE_ACCOUNT || '');
+
+// where a player is in a multi-step flow (deposit / withdraw / transfer); expires after 30 minutes
+const setState = (env, uid, step, data) => env.DB.prepare('INSERT INTO bot_state(uid,step,data,ts) VALUES(?1,?2,?3,?4) ON CONFLICT(uid) DO UPDATE SET step=?2,data=?3,ts=?4').bind(uid, step, JSON.stringify(data || {}), Date.now()).run();
+const getState = async (env, uid) => { const r = await env.DB.prepare('SELECT step,data,ts FROM bot_state WHERE uid=?').bind(uid).first(); if (!r || Date.now() - r.ts > 30 * 60 * 1000) return null; let d = {}; try { d = JSON.parse(r.data || '{}') } catch (e) { } return { ...d, step: r.step } };
+const clearState = (env, uid) => env.DB.prepare('DELETE FROM bot_state WHERE uid=?').bind(uid).run();
+const hasDeposit = async (env, uid) => !!(await env.DB.prepare("SELECT 1 x FROM deposits WHERE user_id=? AND status='approved' LIMIT 1").bind(uid).first());
+
 async function onContact(env, m) { // the player shared their phone number: register and give the welcome bonus
   const db = env.DB, uid = m.from.id, c = m.contact, now = Date.now();
   if (c.user_id && Number(c.user_id) !== Number(uid)) return sendTo(env, uid, '⚠️ እባክዎ የራስዎን ስልክ ቁጥር ብቻ ያጋሩ።', SHARE_KB);
@@ -84,12 +112,12 @@ async function onContact(env, m) { // the player shared their phone number: regi
   const nm = String(c.first_name || m.from.first_name || 'player').trim().slice(0, 30) || 'player';
   await db.prepare('INSERT INTO users(id,name,created_ts) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').bind(uid, nm, now).run();
   const u = await db.prepare('SELECT phone FROM users WHERE id=?').bind(uid).first();
-  if (u && u.phone) return sendTo(env, uid, '✅ አስቀድመው ተመዝግበዋል። ለመጫወት «' + BTN.play + '» ይጫኑ።', await mainKbFor(env, uid));
+  if (u && u.phone) return sendMenu(env, uid, '✅ አስቀድመው ተመዝግበዋል።');
   let ok = false;
   try { ok = (await db.prepare("UPDATE users SET name=?1,phone=?2,balance=balance+?3 WHERE id=?4 AND (phone IS NULL OR phone='')").bind(nm, ph, welcomeC(env), uid).run()).meta.changes > 0 }
   catch (e) { return sendTo(env, uid, `⚠️ ይህ ስልክ ቁጥር በሌላ አካውንት ተመዝግቧል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`, SHARE_KB) }
-  if (!ok) return sendTo(env, uid, '✅ አስቀድመው ተመዝግበዋል።', await mainKbFor(env, uid));
-  return sendTo(env, uid, '🎉 እንኳን ደስ አለዎት! በተሳካ ሁኔታ ተመዝግበዋል።' + (welcomeC(env) > 0 ? `\n🎁 ${B(welcomeC(env))} ብር የእንኳን ደህና መጡ ስጦታ ወደ ዋሌትዎ ተጨምሯል።` : '') + '\n\nለመጫወት «' + BTN.play + '» ይጫኑ።', await mainKbFor(env, uid));
+  if (!ok) return sendMenu(env, uid, '✅ አስቀድመው ተመዝግበዋል።');
+  return sendMenu(env, uid, '✅ ተመዝግበዋል!' + (welcomeC(env) > 0 ? ` የ ${B(welcomeC(env))} ብር ስጦታ ተሰጥቶዎታል።` : '') + '\n\nለመጫወት «Play» ን ይጫኑ።');
 }
 
 /* ---------- money operations (each is one atomic batch) ---------- */
@@ -121,13 +149,39 @@ async function decideWithdraw(env, id, paid) {
   if (done) { const w = await db.prepare('SELECT user_id,amount_c FROM withdrawals WHERE id=?').bind(id).first(); say(env, w.user_id, paid ? `✅ ${B(w.amount_c)} ብር ተልኮልዎታል።` : `↩️ የማውጣት ጥያቄዎ ውድቅ ተደርጓል — ${B(w.amount_c)} ብር ወደ ቀሪ ሂሳብዎ ተመልሷል።`) }
   return done;
 }
+// a deposit request (from the app or from the bot): auto-credited when a matching Telebirr SMS exists, otherwise sent to the admins
+async function makeDeposit(env, u, amt, txid, method) {
+  const db = env.DB, now = Date.now(); let id;
+  try { id = (await db.prepare('INSERT INTO deposits(user_id,txid,amount_c,method,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, txid, C(amt), method, 'pending', now).run()).meta.last_row_id } catch (e) { return { error: 'txid_used' } }
+  const ok = method === 'telebirr' && await tryMatch(env, txid);
+  if (!ok) await notifyAdmins(env, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid }), [[{ text: '✅ Approve', callback_data: 'da:' + id }, { text: '❌ Reject', callback_data: 'dr:' + id }]]);
+  return { status: ok ? 'approved' : 'pending', id };
+}
+// a withdrawal request: balance is taken now and given back if an admin rejects it
+async function makeWithdrawal(env, u, amt, account, method) {
+  const db = env.DB, now = Date.now(); method = String(method || 'telebirr').slice(0, 20);
+  if (!(await hasDeposit(env, u.id))) return { error: 'deposit_required' }; // bonus-farming guard: deposit once before withdrawing
+  let id; try { const r = await db.batch([db.prepare('UPDATE users SET balance=balance-?2 WHERE id=?1').bind(u.id, C(amt)), db.prepare('INSERT INTO withdrawals(user_id,amount_c,method,account,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, C(amt), method, account, 'pending', now)]); id = r[1].meta.last_row_id } catch (e) { return { error: errOf(e) } }
+  await notifyAdmins(env, withdrawText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, account }), [[{ text: '💸 Mark paid', callback_data: 'wp:' + id }, { text: '↩️ Reject', callback_data: 'wr:' + id }]]);
+  return { id };
+}
+// player-to-player transfer: both statements test the sender's balance at the same moment, so either both apply or neither does
+async function makeTransfer(env, u, to, amt) {
+  const db = env.DB, c = C(amt);
+  const r = await db.batch([
+    db.prepare('UPDATE users SET balance=balance+?1 WHERE id=?3 AND id<>?2 AND (SELECT balance FROM users WHERE id=?2)>=?1').bind(c, u.id, to),
+    db.prepare('UPDATE users SET balance=balance-?1 WHERE id=?2 AND (SELECT balance FROM users WHERE id=?2)>=?1 AND EXISTS(SELECT 1 FROM users WHERE id=?3 AND id<>?2)').bind(c, u.id, to)]);
+  return r[1].meta.changes > 0 ? { ok: true } : { error: 'insufficient_balance' };
+}
 
 /* ---------- settings, bans and admin log (tables are created automatically) ---------- */
 let tablesReady = false;
 const ensureTables = async env => { if (tablesReady) return; await env.DB.batch([
   env.DB.prepare('CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY,v TEXT)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS bans(id INTEGER PRIMARY KEY)'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT,ts INTEGER,actor TEXT,action TEXT,detail TEXT)')]); tablesReady = true };
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT,ts INTEGER,actor TEXT,action TEXT,detail TEXT)'),
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS bot_state(uid INTEGER PRIMARY KEY,step TEXT,data TEXT,ts INTEGER)'),
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS referrals(user_id INTEGER PRIMARY KEY,ref_id INTEGER,ts INTEGER)')]); tablesReady = true };
 const cfg = { t: 0, set: {}, bans: new Set() }; // settings and bans are cached for 5 seconds to keep requests fast
 const loadCfg = async env => { if (Date.now() - cfg.t < 5000) return cfg; await ensureTables(env); const [a, b] = await env.DB.batch([env.DB.prepare('SELECT k,v FROM settings'), env.DB.prepare('SELECT id FROM bans')]); cfg.set = Object.fromEntries(a.results.map(r => [r.k, r.v])); cfg.bans = new Set(b.results.map(r => String(r.id))); cfg.t = Date.now(); return cfg };
 const getSet = async (env, k) => (await loadCfg(env)).set[k] ?? null;
@@ -190,11 +244,103 @@ async function leaderboard(env, u, period) {
   return { top: top.map(t => [t.n, t.g]), me: { rank: mine ? higher + 1 : null, played: mine } };
 }
 
-/* ---------- Telegram bot (commands + admin buttons) ---------- */
+/* ---------- Telegram bot: menu buttons, deposit / withdraw / transfer flows, admin commands ---------- */
+async function menuAction(env, u, act) { // a menu button was pressed
+  const uid = u.id, db = env.DB;
+  if (act === 'bal') { const f = await db.prepare('SELECT balance,bonus_c FROM users WHERE id=?').bind(uid).first(); return sendMenu(env, uid, `💳 ቀሪ ሂሳብዎ: ${B(f.balance)} ብር` + (f.bonus_c > 0 ? `\n🎁 ቦነስ: ${B(f.bonus_c)} ብር` : '')) }
+  if (act === 'dep') { await setState(env, uid, 'dep_amount', {}); return sendTo(env, uid, `ማስገባት የፈለጉትን የብር መጠን ከ ${MIN_DEP} ብር ጀምሮ ያስገቡ።`) }
+  if (act === 'ins') return sendMenu(env, uid, instructionText);
+  if (act === 'wd') {
+    if (!(await hasDeposit(env, uid))) return sendMenu(env, uid, '⚠️ ገንዘብ ለማውጣት ቢያንስ አንድ ጊዜ ገንዘብ ማስገባት ያስፈልጋል።');
+    await setState(env, uid, 'wd_amount', {}); return sendTo(env, uid, `💸 ማውጣት የፈለጉትን የብር መጠን ከ ${MIN_WD} ብር ጀምሮ ያስገቡ።\n💳 ቀሪ ሂሳብዎ: ${B(u.balance)} ብር`);
+  }
+  if (act === 'tr') {
+    if (!(await hasDeposit(env, uid))) return sendMenu(env, uid, '⚠️ ገንዘብ ለማስተላለፍ ቢያንስ አንድ ጊዜ ገንዘብ ማስገባት ያስፈልጋል።');
+    await setState(env, uid, 'tr_phone', {}); return sendTo(env, uid, '🎁 ገንዘብ የሚልኩለትን ተጫዋች ስልክ ቁጥር ያስገቡ (ለምሳሌ 09xxxxxxxx)።');
+  }
+  if (act === 'inv') {
+    const c = (await db.prepare('SELECT COUNT(*) c FROM referrals r JOIN users x ON x.id=r.user_id WHERE r.ref_id=? AND x.phone IS NOT NULL').bind(uid).first()).c;
+    return sendMenu(env, uid, `🔗 ጓደኞችዎን ይጋብዙ!\n\nየእርስዎ መጋበዣ ሊንክ፦\nhttps://t.me/${env.BOT_USERNAME || 'Amanbingo2bot'}?start=ref${uid}\n\n👥 የተመዘገቡ ጓደኞችዎ፦ ${c}`);
+  }
+}
+async function onPlayerCb(env, q, parts) { // menu / bank / cancel buttons
+  const uid = q.from.id, a = parts[0];
+  await tg(env, 'answerCallbackQuery', { callback_query_id: q.id });
+  const u = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(uid).first();
+  if (!u || !u.phone) return askContact(env, uid);
+  if (await isBanned(env, uid)) return sendTo(env, uid, `⛔ አካውንትዎ ታግዷል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`);
+  if (a === 'm') { await clearState(env, uid); return menuAction(env, u, parts[1]) }
+  if (a === 'b') {
+    if (parts[1] === 'x') { await clearState(env, uid); return sendMenu(env, uid, '❌ ተሰርዟል።') }
+    const flow = parts[1], bank = parts[2], st = await getState(env, uid);
+    if (!BANKS[bank] || (bank === 'cbe' && !env.CBE_ACCOUNT)) return;
+    if (flow === 'd') {
+      if (!st || st.step !== 'dep_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «Deposit» ን እንደገና ይጫኑ።');
+      await setState(env, uid, 'dep_paste', { amt: st.amt, method: bank });
+      return sendTo(env, uid, `የሚያጋጥማቹ የክፍያ ችግር:\n${SUPPORT} ላይ ፃፉልን።\n\n1. ከታች ባለው አካውንት ${st.amt} ብር ያስገቡ\n${acctText(env, bank)}\n\n2. የከፈሉበትን አጭር የጽሁፍ መልዕክት(message) copy በማድረግ እዚ ላይ Paste አድርገው ያስገቡና ይላኩት 👇👇👇`);
+    }
+    if (flow === 'w') {
+      if (!st || st.step !== 'wd_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «Withdraw» ን እንደገና ይጫኑ።');
+      await setState(env, uid, 'wd_account', { amt: st.amt, method: bank });
+      return sendTo(env, uid, `${BANKS[bank]} — ገንዘቡ የሚላክበትን አካውንት ወይም ስልክ ቁጥር ያስገቡ።`);
+    }
+  }
+}
+async function onStep(env, u, st, text) { // the player typed something while in a flow
+  const uid = u.id, t = String(text).trim(), num = Number(t.replace(/,/g, '')), isAmt = t !== '' && isFinite(num) && num > 0 && num <= 100000;
+  if (st.step === 'dep_amount') {
+    if (!isAmt || num < MIN_DEP) return sendTo(env, uid, `⚠️ ማስገባት የሚችሉት ከ ${MIN_DEP} ብር ጀምሮ ነው። ቁጥር ብቻ ያስገቡ።`);
+    await setState(env, uid, 'dep_bank', { amt: num });
+    return sendTo(env, uid, '🏦 የሚፈልጉትን የክፍያ አማራጭ ይምረጡ፦\n- ከቴሌ ብር ወደ ቴሌ ብር\n- ከባንክ ወደ ተመሳሳይ ባንክ ብቻ ያስገቡ', bankKb(env, 'd'));
+  }
+  if (st.step === 'dep_bank') return sendTo(env, uid, '👇 እባክዎ ከታች ካሉት አማራጮች ይምረጡ።', bankKb(env, 'd'));
+  if (st.step === 'dep_paste') {
+    const pr = parsePaste(t);
+    if (!pr) return sendTo(env, uid, '⚠️ የግብይት ቁጥር አልተገኘም። የከፈሉበትን ሙሉ መልዕክት እንደገና copy አድርገው Paste ያድርጉ።');
+    const r = await makeDeposit(env, u, st.amt, pr.txid, st.method);
+    if (r.error) return sendTo(env, uid, '⚠️ ይህ የግብይት ቁጥር ከዚህ በፊት ተመዝግቧል። ሌላ መልዕክት ያስገቡ።');
+    await clearState(env, uid);
+    return r.status === 'approved' ? null : sendMenu(env, uid, '⏳ ጥያቄዎ ደርሶናል። አስተዳዳሪው ካረጋገጠ በኋላ ገንዘቡ ወደ ሂሳብዎ ይጨመራል።');
+  }
+  if (st.step === 'wd_amount') {
+    if (!isAmt || num < MIN_WD) return sendTo(env, uid, `⚠️ ማውጣት የሚችሉት ከ ${MIN_WD} ብር ጀምሮ ነው። ቁጥር ብቻ ያስገቡ።`);
+    if (C(num) > u.balance) return sendTo(env, uid, `⚠️ ቀሪ ሂሳብዎ በቂ አይደለም (${B(u.balance)} ብር)። ሌላ መጠን ያስገቡ።`);
+    await setState(env, uid, 'wd_bank', { amt: num });
+    return sendTo(env, uid, '🏦 ገንዘቡ የሚላክበትን አማራጭ ይምረጡ፦', bankKb(env, 'w'));
+  }
+  if (st.step === 'wd_bank') return sendTo(env, uid, '👇 እባክዎ ከታች ካሉት አማራጮች ይምረጡ።', bankKb(env, 'w'));
+  if (st.step === 'wd_account') {
+    const account = t.slice(0, 40); if (account.length < 4) return sendTo(env, uid, '⚠️ አካውንት ወይም ስልክ ቁጥር በትክክል ያስገቡ።');
+    const r = await makeWithdrawal(env, u, st.amt, account, st.method);
+    if (r.error === 'deposit_required') { await clearState(env, uid); return sendMenu(env, uid, '⚠️ ገንዘብ ለማውጣት ቢያንስ አንድ ጊዜ ገንዘብ ማስገባት ያስፈልጋል።') }
+    if (r.error) { await clearState(env, uid); return sendMenu(env, uid, '⚠️ ቀሪ ሂሳብዎ በቂ አይደለም።') }
+    await clearState(env, uid);
+    return sendMenu(env, uid, `✅ የ${st.amt} ብር የማውጣት ጥያቄዎ ተልኳል። አስተዳዳሪው ሲልክልዎ መልዕክት ይደርስዎታል።`);
+  }
+  if (st.step === 'tr_phone') {
+    const ph = normPhone(t); if (!ph) return sendTo(env, uid, '⚠️ ስልክ ቁጥሩ ትክክል አይደለም። (09… ወይም 07…) ያስገቡ።');
+    const to = await env.DB.prepare('SELECT id,name FROM users WHERE phone=?').bind(ph).first();
+    if (!to) return sendTo(env, uid, '⚠️ በዚህ ስልክ ቁጥር የተመዘገበ ተጫዋች አልተገኘም።');
+    if (to.id === uid) return sendTo(env, uid, '⚠️ ለራስዎ ማስተላለፍ አይችሉም።');
+    await setState(env, uid, 'tr_amount', { to: to.id, name: to.name });
+    return sendTo(env, uid, `🎁 ለ ${to.name} የሚልኩትን የብር መጠን ያስገቡ (ከ ${MIN_TR} ብር ጀምሮ)።\n💳 ቀሪ ሂሳብዎ: ${B(u.balance)} ብር`);
+  }
+  if (st.step === 'tr_amount') {
+    if (!isAmt || num < MIN_TR) return sendTo(env, uid, `⚠️ ማስተላለፍ የሚችሉት ከ ${MIN_TR} ብር ጀምሮ ነው። ቁጥር ብቻ ያስገቡ።`);
+    const r = await makeTransfer(env, u, st.to, num);
+    await clearState(env, uid);
+    if (r.error) return sendMenu(env, uid, '⚠️ ቀሪ ሂሳብዎ በቂ አይደለም።');
+    say(env, st.to, `🎁 ${num} ብር ከ ${u.name} ተላልፎልዎታል።`, playKb(env));
+    return sendMenu(env, uid, `✅ ${num} ብር ለ ${st.name} ተልኳል።`);
+  }
+  return null;
+}
+
 async function onTelegram(env, up) {
-  const db = env.DB;
+  const db = env.DB; await ensureTables(env);
   if (up.callback_query) {
-    const q = up.callback_query, [a, id] = String(q.data).split(':');
+    const q = up.callback_query, parts = String(q.data).split(':'), [a, id] = parts;
+    if (a === 'm' || a === 'b') return onPlayerCb(env, q, parts);
     if (!(await isAdmin(env, q.from.id))) return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: 'Admin only' });
     const ok = a === 'da' ? await decideDeposit(env, +id, true) : a === 'dr' ? await decideDeposit(env, +id, false) : a === 'wp' ? await decideWithdraw(env, +id, true) : a === 'wr' ? await decideWithdraw(env, +id, false) : false;
     await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: ok ? 'Done' : 'Already processed' });
@@ -204,9 +350,14 @@ async function onTelegram(env, up) {
   if (m.contact) return onContact(env, m); // player shared their phone number
   if (!m.text) return;
   const text = m.text.trim(), cmd = text.split(/[\s@]/)[0].toLowerCase(), uid = m.from.id; await refreshBonus(env, uid, Date.now()); const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(uid).first();
+  if (text.startsWith('/') || Object.values(BTN).includes(text) || text === 'Admin 🛠') await clearState(env, uid); // a command or menu text always leaves any flow
+  if (cmd === '/start' && !(u && u.phone)) { // remember who invited this player
+    const mm = text.match(/^\/start(?:@\w+)?\s+ref(\d+)/i);
+    if (mm && Number(mm[1]) !== uid) await db.prepare('INSERT OR IGNORE INTO referrals(user_id,ref_id,ts) VALUES(?,?,?)').bind(uid, Number(mm[1]), Date.now()).run();
+  }
   if (cmd === '/balance' || text === BTN.bal) {
     if (!u || !u.phone) return askContact(env, uid);
-    return sendTo(env, uid, `💳 ቀሪ ሂሳብዎ: ${B(u.balance)} ብር` + (u.bonus_c > 0 ? `\n🎁 ቦነስ: ${B(u.bonus_c)} ብር` : ''), await mainKbFor(env, uid));
+    return menuAction(env, u, 'bal');
   }
   if (isOwner(env, uid) && (cmd === '/addadmin' || cmd === '/removeadmin' || cmd === '/admins')) {
     const list = await admins(env), id = (m.text.split(/\s+/)[1] || '').replace(/\D/g, '');
@@ -224,31 +375,34 @@ async function onTelegram(env, up) {
     return;
   }
   if ((cmd === '/admin' || text === 'Admin 🛠') && await isAdmin(env, uid)) return tg(env, 'sendMessage', { chat_id: uid, text: 'Admin dashboard', reply_markup: { inline_keyboard: [[{ text: 'Open admin 🛠', web_app: { url: adminUrl(env) } }]] } });
-   if (isOwner(env, uid) && (cmd === '/broadcast' || cmd === '/more')) {
-  await ensureTables(env);
-  const rd = async k => ((await db.prepare('SELECT v FROM settings WHERE k=?').bind(k).first()) || {}).v || '';
-  if (cmd === '/broadcast') {
-    const t0 = m.text.replace(/^\/broadcast(@\w+)?\s*/i, '');
-    if (!t0) return say(env, uid, 'Send it like this: /broadcast your message');
-    await setSet(env, 'bc_text', t0); await setSet(env, 'bc_cursor', '0');
+  if (isOwner(env, uid) && (cmd === '/broadcast' || cmd === '/more')) {
+    const rd = async k => ((await db.prepare('SELECT v FROM settings WHERE k=?').bind(k).first()) || {}).v || '';
+    if (cmd === '/broadcast') {
+      const t0 = m.text.replace(/^\/broadcast(@\w+)?\s*/i, '');
+      if (!t0) return say(env, uid, 'Send it like this: /broadcast your message');
+      await setSet(env, 'bc_text', t0); await setSet(env, 'bc_cursor', '0');
+    }
+    const t = await rd('bc_text'), cur = Number(await rd('bc_cursor') || 0);
+    if (!t) return say(env, uid, 'Start with /broadcast your message');
+    const rows = (await db.prepare("SELECT id FROM users WHERE phone IS NOT NULL AND id>? ORDER BY id LIMIT 40").bind(cur).all()).results;
+    if (!rows.length) return say(env, uid, '✅ Broadcast finished.');
+    await Promise.all(rows.map(r => env.PROMO_PHOTO
+      ? tg(env, 'sendPhoto', { chat_id: r.id, photo: env.PROMO_PHOTO, caption: t, reply_markup: { inline_keyboard: playKb(env) } })
+      : tg(env, 'sendMessage', { chat_id: r.id, text: t, reply_markup: { inline_keyboard: playKb(env) } })));
+    await setSet(env, 'bc_cursor', String(rows[rows.length - 1].id));
+    return say(env, uid, `📤 Sent to ${rows.length} players. Send /more for the next batch.`);
   }
-  const t = await rd('bc_text'), cur = Number(await rd('bc_cursor') || 0);
-  if (!t) return say(env, uid, 'Start with /broadcast your message');
-  const rows = (await db.prepare("SELECT id FROM users WHERE phone IS NOT NULL AND id>? ORDER BY id LIMIT 40").bind(cur).all()).results;
-  if (!rows.length) return say(env, uid, '✅ Broadcast finished.');
-  await Promise.all(rows.map(r => env.PROMO_PHOTO
-    ? tg(env, 'sendPhoto', { chat_id: r.id, photo: env.PROMO_PHOTO, caption: t, reply_markup: { inline_keyboard: playKb(env) } })
-    : tg(env, 'sendMessage', { chat_id: r.id, text: t, reply_markup: { inline_keyboard: playKb(env) } })));
-  await setSet(env, 'bc_cursor', String(rows[rows.length - 1].id));
-  return say(env, uid, `📤 Sent to ${rows.length} players. Send /more for the next batch.`);
-}
   if (!u || !u.phone) return askContact(env, uid); // new player: must share the phone number first
-  const kb = await mainKbFor(env, uid);
-   if (text === BTN.play || cmd === '/play') return sendTo(env, uid, '🎮 ለመጫወት ከታች ያለውን ቁልፍ ይጫኑ።', { inline_keyboard: playKb(env) });
-  if (text === BTN.dep || cmd === '/deposit') return sendTo(env, uid, depositInfo, kb);
-  if (text === BTN.sup || cmd === '/support') return sendTo(env, uid, `🆘 ለእርዳታ ያነጋግሩን: ${SUPPORT}`, kb);
-  if (cmd === '/withdraw') return sendTo(env, uid, '💸 ገንዘብ ለማውጣት ጨዋታውን ከፍተው «ዋሌት» ውስጥ «Withdraw» ን ይጫኑ።', kb);
-  return sendTo(env, uid, '🎮 እንኳን ደህና መጡ! ለመጫወት «' + BTN.play + '» ይጫኑ።', kb);
+  if (await isBanned(env, uid)) return sendTo(env, uid, `⛔ አካውንትዎ ታግዷል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`);
+  const st = await getState(env, uid); if (st) { const h = await onStep(env, u, st, text); if (h !== null && h !== undefined) return h; if (st.step === 'dep_paste') return } // inside a flow: the step handles the message
+  if (text === BTN.play || cmd === '/play') return sendTo(env, uid, '🎮 ለመጫወት ከታች ያለውን ቁልፍ ይጫኑ።', { inline_keyboard: playKb(env) });
+  if (text === BTN.dep || cmd === '/deposit') return menuAction(env, u, 'dep');
+  if (text === BTN.sup || cmd === '/support') return sendTo(env, uid, `🆘 ለእርዳታ ያነጋግሩን: ${SUPPORT}`, { inline_keyboard: [[{ text: 'Contact Support... 🆘', url: 'https://t.me/' + SUPPORT.slice(1) }]] });
+  if (cmd === '/withdraw') return menuAction(env, u, 'wd');
+  if (cmd === '/transfer') return menuAction(env, u, 'tr');
+  if (cmd === '/invite') return menuAction(env, u, 'inv');
+  if (cmd === '/instruction') return menuAction(env, u, 'ins');
+  return sendMenu(env, uid, '🎮 እንኳን ደህና መጡ! ከታች ካሉት አማራጮች ይምረጡ።');
 }
 const depositText = x => `💰 Deposit #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr via ${x.method}\nTransaction: ${x.txid}\nNo matching SMS yet — approve only if the money arrived.`;
 const notifyAdmins = async (env, text, kb) => Promise.all((await admins(env)).map(a => say(env, a, text, kb)));
@@ -389,21 +543,17 @@ async function route(req, env, url) {
     return J(await stateFor(env, u, r));
   }
   if (p === '/api/deposit') {
-    const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = b.method === 'boa' ? 'boa' : 'telebirr';
+    const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = ['telebirr', 'cbe', 'boa', 'dashen'].includes(b.method) ? b.method : 'telebirr';
     if (!(amt >= MIN_DEP) || txid.length < 8 || txid.length > 14) return J({ error: 'bad_input', min: MIN_DEP }, 400);
-    let id; try { id = (await db.prepare('INSERT INTO deposits(user_id,txid,amount_c,method,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, txid, C(amt), method, 'pending', now).run()).meta.last_row_id } catch (e) { return J({ error: 'txid_used' }, 409) }
-    const ok = method === 'telebirr' && await tryMatch(env, txid);
-    if (!ok) await notifyAdmins(env, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid }), [[{ text: '✅ Approve', callback_data: 'da:' + id }, { text: '❌ Reject', callback_data: 'dr:' + id }]]);
-    return J({ status: ok ? 'approved' : 'pending', balance: B((await db.prepare('SELECT balance FROM users WHERE id=?').bind(u.id).first()).balance) });
+    const r = await makeDeposit(env, u, amt, txid, method); if (r.error) return J({ error: r.error }, 409);
+    return J({ status: r.status, balance: B((await db.prepare('SELECT balance FROM users WHERE id=?').bind(u.id).first()).balance) });
   }
   if (p === '/api/withdraw') {
     const amt = Number(b.amount), account = String(b.account || '').trim().slice(0, 40), method = String(b.method || 'telebirr').slice(0, 20);
     if (!(amt >= MIN_WD) || !account) return J({ error: 'bad_input', min: MIN_WD }, 400);
-    if (!(await db.prepare("SELECT 1 x FROM deposits WHERE user_id=? AND status='approved' LIMIT 1").bind(u.id).first())) return J({ error: 'deposit_required' }, 403); // bonus-farming guard: deposit once before withdrawing
-    let id; try { const r = await db.batch([db.prepare('UPDATE users SET balance=balance-?2 WHERE id=?1').bind(u.id, C(amt)), db.prepare('INSERT INTO withdrawals(user_id,amount_c,method,account,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, C(amt), method, account, 'pending', now)]); id = r[1].meta.last_row_id } catch (e) { return J({ error: errOf(e) }, 409) }
-    await notifyAdmins(env, withdrawText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, account }), [[{ text: '💸 Mark paid', callback_data: 'wp:' + id }, { text: '↩️ Reject', callback_data: 'wr:' + id }]]);
+    const r = await makeWithdrawal(env, u, amt, account, method); if (r.error) return J({ error: r.error }, r.error === 'deposit_required' ? 403 : 409);
     return J({ status: 'pending' });
-  }                              
+  }
   return J({ error: 'not_found' }, 404);
 }
 export default {
