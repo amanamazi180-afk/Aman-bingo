@@ -224,6 +224,24 @@ async function onTelegram(env, up) {
     return;
   }
   if ((cmd === '/admin' || text === 'Admin 🛠') && await isAdmin(env, uid)) return tg(env, 'sendMessage', { chat_id: uid, text: 'Admin dashboard', reply_markup: { inline_keyboard: [[{ text: 'Open admin 🛠', web_app: { url: adminUrl(env) } }]] } });
+   if (isOwner(env, uid) && (cmd === '/broadcast' || cmd === '/more')) {
+  await ensureTables(env);
+  const rd = async k => ((await db.prepare('SELECT v FROM settings WHERE k=?').bind(k).first()) || {}).v || '';
+  if (cmd === '/broadcast') {
+    const t0 = m.text.replace(/^\/broadcast(@\w+)?\s*/i, '');
+    if (!t0) return say(env, uid, 'Send it like this: /broadcast your message');
+    await setSet(env, 'bc_text', t0); await setSet(env, 'bc_cursor', '0');
+  }
+  const t = await rd('bc_text'), cur = Number(await rd('bc_cursor') || 0);
+  if (!t) return say(env, uid, 'Start with /broadcast your message');
+  const rows = (await db.prepare("SELECT id FROM users WHERE phone IS NOT NULL AND id>? ORDER BY id LIMIT 40").bind(cur).all()).results;
+  if (!rows.length) return say(env, uid, '✅ Broadcast finished.');
+  await Promise.all(rows.map(r => env.PROMO_PHOTO
+    ? tg(env, 'sendPhoto', { chat_id: r.id, photo: env.PROMO_PHOTO, caption: t, reply_markup: { inline_keyboard: playKb(env) } })
+    : tg(env, 'sendMessage', { chat_id: r.id, text: t, reply_markup: { inline_keyboard: playKb(env) } })));
+  await setSet(env, 'bc_cursor', String(rows[rows.length - 1].id));
+  return say(env, uid, `📤 Sent to ${rows.length} players. Send /more for the next batch.`);
+}
   if (!u || !u.phone) return askContact(env, uid); // new player: must share the phone number first
   const kb = await mainKbFor(env, uid);
    if (text === BTN.play || cmd === '/play') return sendTo(env, uid, '🎮 ለመጫወት ከታች ያለውን ቁልፍ ይጫኑ።', { inline_keyboard: playKb(env) });
