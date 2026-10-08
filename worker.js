@@ -191,6 +191,23 @@ const isBanned = async (env, id) => (await loadCfg(env)).bans.has(String(id));
 /* ---------- shared game rounds (advanced lazily on every request) ---------- */
 const latest = db => db.prepare('SELECT * FROM rounds ORDER BY id DESC LIMIT 1').first();
 const callsAt = (r, now) => Math.min(75, Math.max(0, Math.floor((now - r.start_ts - LOBBY_MS) / CALL_MS) + 1));
+// Once a round has started its picks and number order never change, so they are kept in memory
+// (one database read per round instead of one per request) and the winner check only looks at newly called numbers.
+let rcache = null;
+async function roundCache(env, r) {
+  if (rcache && rcache.id === r.id) return rcache;
+  const picks = (await env.DB.prepare('SELECT p.cartela,p.user_id,u.name FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=?').bind(r.id).all()).results;
+  return rcache = { id: r.id, picks, order: numberOrder(r.seed), cards: null, k: 0, marked: new Set(), win: null };
+}
+function winnersAt(rc, k) { // same result as findWinners(order, picks, k), but remembers how far it already checked
+  if (!rc.cards) rc.cards = rc.picks.map(p => makeCard(p.cartela));
+  while (!rc.win && rc.k < k) {
+    rc.marked.add(rc.order[rc.k]); rc.k++;
+    const w = rc.picks.filter((_, i) => hasBingo(rc.cards[i], rc.marked));
+    if (w.length) rc.win = { k: rc.k, picks: w };
+  }
+  return rc.win;
+}
 function refundAndClose(env, r, from, now) {
   const db = env.DB;
   return db.batch([
@@ -212,8 +229,8 @@ async function advance(env) {
     r = await db.prepare('SELECT * FROM rounds WHERE id=?').bind(r.id).first();
   }
   if (r.status === 'running') {
-    const k = callsAt(r, now), picks = (await db.prepare('SELECT cartela,user_id FROM picks WHERE round_id=?').bind(r.id).all()).results;
-    const w = findWinners(numberOrder(r.seed), picks, k);
+    const k = callsAt(r, now), rc = await roundCache(env, r), picks = rc.picks;
+    const w = winnersAt(rc, k);
     if (w) {
       const prize = Math.floor(picks.length * r.stake_c * CUT), share = Math.floor(prize / w.picks.length);
       await db.batch([...w.picks.map(p => db.prepare("UPDATE users SET balance=balance+?3 WHERE id=?2 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running')").bind(r.id, p.user_id, share)),
@@ -225,13 +242,19 @@ async function advance(env) {
 }
 async function stateFor(env, u, round) {
   const db = env.DB, r = round || await advance(env), now = Date.now();
-  const [pr, mr] = await db.batch([db.prepare('SELECT p.cartela,p.user_id,u.name FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=?').bind(r.id), db.prepare('SELECT balance,bonus_c FROM users WHERE id=?').bind(u.id)]);
-  const picks = pr.results, me = mr.results[0];
+  let picks, me, rc = null;
+  if (r.status === 'lobby') { // picks still change in the lobby, so read them fresh
+    const [pr, mr] = await db.batch([db.prepare('SELECT p.cartela,p.user_id,u.name FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=?').bind(r.id), db.prepare('SELECT balance,bonus_c FROM users WHERE id=?').bind(u.id)]);
+    picks = pr.results; me = mr.results[0];
+  } else { // running / ended / cancelled: picks are final, use the in-memory copy
+    [rc, me] = await Promise.all([roundCache(env, r), db.prepare('SELECT balance,bonus_c FROM users WHERE id=?').bind(u.id).first()]);
+    picks = rc.picks;
+  }
   const n = r.status === 'running' ? callsAt(r, now) : r.status === 'ended' ? r.called_n : 0;
   const win = r.status === 'ended' ? JSON.parse(r.winners || '[]') : [];
   return { now, round: { id: r.id, status: r.status, start_ts: r.start_ts, lobby_ms: LOBBY_MS, call_ms: CALL_MS, stake: B(r.stake_c), rest_ms: REST_MS, ended_ts: r.ended_ts },
     taken: picks.map(p => p.cartela), mine: picks.filter(p => p.user_id === u.id).map(p => p.cartela),
-    called: numberOrder(r.seed).slice(0, n), players: new Set(picks.map(p => p.user_id)).size, cards: picks.length,
+    called: n && rc ? rc.order.slice(0, n) : [], players: new Set(picks.map(p => p.user_id)).size, cards: picks.length,
     derash: B(Math.floor(picks.length * r.stake_c * CUT)), winners: picks.filter(p => win.includes(p.cartela)).map(p => ({ cartela: p.cartela, name: p.name })), balance: B(me.balance), bonus: B(me.bonus_c) };
 }
 const startOfDay = () => Math.floor((Date.now() + 3 * 36e5) / 864e5) * 864e5 - 3 * 36e5; // Ethiopia time (UTC+3)
@@ -514,8 +537,13 @@ async function route(req, env, url) {
   if (!p.startsWith('/api/')) return J({ error: 'not_found' }, 404);
   if (p.startsWith('/api/admin/')) return adminRoute(req, env, url);
   const tu = await verifyInit(req.headers.get('x-init-data'), env.BOT_TOKEN); if (!tu) return J({ error: 'unauthorized' }, 401);
-  const rs = await db.batch([db.prepare('INSERT INTO users(id,name,created_ts) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').bind(tu.id, tu.first_name || 'player', now), refreshBonusStmt(env, tu.id, now), db.prepare('SELECT * FROM users WHERE id=?').bind(tu.id)]); // one round trip
-  const u = rs[2].results[0], b = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+  // Look the player up with a plain read first. The old code ran an INSERT and an UPDATE on every request, which
+  // made every poll a database write; now a write happens only for a brand-new player or when the bonus period changes.
+  const selUser = () => db.prepare('SELECT * FROM users WHERE id=?').bind(tu.id);
+  let u = await selUser().first();
+  if (!u) u = (await db.batch([db.prepare('INSERT INTO users(id,name,created_ts) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').bind(tu.id, tu.first_name || 'player', now), refreshBonusStmt(env, tu.id, now), selUser()]))[2].results[0];
+  else if (u.bonus_period < bonusPeriod(now) || (bonusC(env) === 0 && u.bonus_c !== 0)) { await refreshBonusStmt(env, u.id, now).run(); u = await selUser().first() }
+  const b = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
   const need = () => u.phone ? null : J({ error: 'not_registered' }, 403);
   if (p !== '/api/me' && await isBanned(env, u.id)) return J({ error: 'banned' }, 403);
   if (p === '/api/me') { const dep = (await db.prepare('SELECT amount_c,status,ts FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results, wd = (await db.prepare('SELECT amount_c,status,ts FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results; return J({ id: u.id, name: u.name, phone: u.phone, registered: !!u.phone, balance: B(u.balance), bonus: B(u.bonus_c), deposits: dep.map(x => ({ ...x, amount: B(x.amount_c) })), withdrawals: wd.map(x => ({ ...x, amount: B(x.amount_c) })) }) }
