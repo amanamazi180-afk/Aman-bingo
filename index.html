@@ -5,7 +5,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@800;900&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#0a1224;--cd:#111c36;--ln:#26365e;--or:#f5b73b;--gr:#22c55e;--rd:#ef4444;--tx:#e8eefc;--mu:#93a3c7;--dk:#04150c;--tk:#ef4444;--cl:#ef4444}
+:root{--bg:#0a1224;--cd:#111c36;--ln:#26365e;--or:#f5b73b;--gr:#22c55e;--rd:#ef4444;--tx:#e8eefc;--mu:#93a3c7;--dk:#04150c;--tk:#dc2626;--cl:#dc2626}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;-webkit-text-size-adjust:100%}
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx);overflow:hidden;touch-action:manipulation}
@@ -32,7 +32,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .hint{font-size:13px;color:var(--mu);text-align:center}
 .grid{flex:1;min-height:140px;overflow-y:auto;-webkit-overflow-scrolling:touch;display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;align-content:start;background:#0d1730;border:1px solid var(--ln);border-radius:18px;padding:8px}
 .n{background:#182650;border:1.5px solid #33477a;border-radius:9px;height:38px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px}
-.n.mine{background:var(--gr);border-color:var(--gr);color:var(--dk)}.n.tk{background:var(--tk);border-color:var(--tk);color:#fff;opacity:.85}
+.n.mine{background:var(--gr);border-color:var(--gr);color:var(--dk)}.n.tk{background:var(--tk);border-color:var(--tk);color:#fff;font-weight:900;opacity:1}
 .prev{display:grid;grid-template-columns:1fr 1fr;gap:8px}.prev:empty{display:none}
 .card{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
 .card .h{border-radius:6px;font-weight:800;text-align:center;padding:3px 0;font-size:13px;color:#fff}
@@ -48,7 +48,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .board{width:47%;background:var(--cd);border:1px solid var(--ln);border-radius:16px;padding:6px;display:grid;grid-template-columns:repeat(5,1fr);gap:3px;grid-auto-rows:1fr}
 .board .hd{border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
 .nn{display:flex;align-items:center;justify-content:center;border-radius:7px;background:#182650;border:1px solid #33477a;font-weight:700;font-size:13px}
-.nn.k{background:var(--cl);border-color:var(--cl);color:#fff}.nn.l{background:var(--gr);border-color:var(--gr);color:var(--dk)}
+.nn.k{background:var(--cl);border-color:var(--cl);color:#fff;font-weight:900}.nn.l{background:var(--cl);border-color:var(--or);color:#fff;font-weight:900;box-shadow:0 0 0 2px var(--or)}
 .side{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
 .box{background:var(--cd);border:1px solid var(--ln);border-radius:18px}
 .recent{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;min-height:50px}
@@ -82,7 +82,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
   <div class="pill t" style="flex:none;padding:10px"><small>DERASH</small><b id="lder" style="font-size:34px">0</b> <small style="display:inline">birr</small></div>
   <div class="row"><button class="gb" onclick="backHome()">← Back</button><div style="flex:1"></div><button class="gb" onclick="key='';tick()">⟳ Refresh</button></div>
   <div class="row"><div class="pill"><small>MAIN WALLET</small><b id="lm">0</b></div><div class="pill"><small>PLAY WALLET</small><b id="lp">0</b></div><div class="pill"><small>STAKE</small><b id="ls">10</b></div><div class="pill"><small>PLAYERS</small><b id="lpl">0</b></div><div class="pill t"><b id="lt">-</b></div></div>
-  <p class="hint">Tap numbers to pick your cartela (max 2). <span style="color:#22c55e">Green</span> = yours · <span style="color:#ef4444">red</span> = taken</p>
+  <p class="hint">Tap numbers to pick your cartela (max 2). <span style="color:#22c55e">Green</span> = yours · <span style="color:#dc2626;font-weight:900">red</span> = taken</p>
   <div class="grid" id="grid"></div>
   <div class="prev" id="prev"></div>
 </div>
@@ -136,21 +136,32 @@ function mk(no){let s=no*7919+13;const r=()=>(s=(s*1664525+1013904223)%429496729
 function winLine(c,cl){const m=(a,b)=>c[a][b]===0||cl.includes(c[a][b]),ls=[];for(let i=0;i<5;i++){ls.push([0,1,2,3,4].map(j=>[j,i]));ls.push([0,1,2,3,4].map(j=>[i,j]))}ls.push([0,1,2,3,4].map(j=>[j,j]));ls.push([0,1,2,3,4].map(j=>[j,4-j]));return ls.find(l=>l.every(([a,b])=>m(a,b)))||null}
 function cardHTML(no,cl,hl,last){const c=mk(no);let h='<div class="card">'+[..."BINGO"].map((l,i)=>`<div class="h" style="background:${CL[i]}">${l}</div>`).join("");for(let r=0;r<5;r++)for(let k=0;k<5;k++){const v=c[k][r],m=v===0||cl.includes(v),w=hl&&hl.some(x=>x[0]===k&&x[1]===r);h+=`<div class="c${w?" w":m?" m":""}${v&&v===last?" l":""}">${v===0?"★":v}</div>`}return h+"</div>"}
 
-/* voice (iPhone needs the audio to be unlocked by a tap, see unlock()) */
-const _a={};let _cur=null,_q=[],_playing=false,_vt=0,_unl=false;
+/* VOICE - iPhone fix.
+   iPhone only lets <audio> play inside a tap, so the timer-called numbers were silent.
+   Now every sound is decoded once and played through ONE Web Audio context that is unlocked by the player's first tap. */
+const _a={},_buf={};let _cur=null,_q=[],_playing=false,_vt=0,_src=null,AC=null,_unl=false,wonSnd=0;
 function aud(n){if(!_a[n]){const a=new Audio(n+".m4a");a.preload="auto";a.setAttribute("playsinline","");_a[n]=a}return _a[n]}
-function preload(){for(let n=1;n<=75;n++)try{aud(n).load()}catch(e){}}
-let AC=null,wonSnd=0;
-function unlock(){try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")AC.resume()}catch(e){}if(_unl)return;_unl=true;try{const a=aud(1);a.muted=true;const p=a.play();const done=()=>{try{a.pause();a.currentTime=0}catch(e){}a.muted=false};if(p&&p.then)p.then(done,()=>{a.muted=false;_unl=false});else done()}catch(e){_unl=false}}
-function stopVoice(){_q=[];_playing=false;clearTimeout(_vt);if(_cur){try{_cur.pause()}catch(e){}_cur=null}}
+function ac(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}return AC}
+function loadBuf(k){if(_buf[k]!==undefined)return;_buf[k]=null;const c=ac();if(!c)return;
+  fetch(k+".m4a").then(r=>{if(!r.ok)throw 0;return r.arrayBuffer()}).then(ab=>new Promise((ok,no)=>{const p=c.decodeAudioData(ab,ok,no);if(p&&p.catch)p.catch(no)})).then(b=>{_buf[k]=b}).catch(()=>{_buf[k]=false})}
+function preload(){for(let n=1;n<=75;n++)loadBuf(n);loadBuf("bingo")}
+function unlock(){const c=ac();if(!c)return;try{if(c.state!=="running")c.resume();if(!_unl){const s=c.createBufferSource();s.buffer=c.createBuffer(1,1,22050);s.connect(c.destination);s.start(0);_unl=true}}catch(e){}}
+["touchstart","touchend","click"].forEach(e=>document.addEventListener(e,unlock,{passive:true}));
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)unlock()});
+function stopVoice(){_q=[];_playing=false;clearTimeout(_vt);if(_src){const s=_src;_src=null;s.onended=null;try{s.stop()}catch(e){}}if(_cur){try{_cur.pause()}catch(e){}_cur=null}}
 function nextVoice(){clearTimeout(_vt);const n=_q.shift();if(n===undefined){_playing=false;return}
-  _playing=true;const a=aud(n);_cur=a;a.onended=a.onerror=()=>{a.onended=a.onerror=null;nextVoice()};
+  _playing=true;const c=AC,b=_buf[n];
+  if(c&&b){try{if(c.state!=="running")c.resume();const s=c.createBufferSource();s.buffer=b;s.connect(c.destination);_src=s;
+    s.onended=()=>{if(_src===s){_src=null;nextVoice()}};
+    _vt=setTimeout(()=>{try{s.stop()}catch(e){}},Math.min(8000,b.duration*1000+800));s.start(0);return}catch(e){_src=null}}
+  if(b===undefined)loadBuf(n);
+  const a=aud(n);_cur=a;a.onended=a.onerror=()=>{a.onended=a.onerror=null;nextVoice()};
   _vt=setTimeout(()=>{try{a.pause()}catch(e){}nextVoice()},8000);
   try{a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(()=>nextVoice())}catch(e){nextVoice()}}
 function playNum(n){if(!snd_on)return;_q.push(n);if(_q.length>3)_q.shift();if(!_playing)nextVoice()}
 /* winner sound: plays bingo.m4a if you add that file next to index.html, otherwise a built-in fanfare */
 function fanfare(){try{if(!AC)return;if(AC.state==="suspended")AC.resume();const t=AC.currentTime;[[523,0],[659,.14],[784,.28],[1047,.42],[784,.62],[1047,.76],[1319,.9]].forEach(([f,d],i)=>{const o=AC.createOscillator(),g=AC.createGain();o.type="triangle";o.frequency.value=f;o.connect(g);g.connect(AC.destination);const a=t+d,e=a+(i===6?.9:.18);g.gain.setValueAtTime(.0001,a);g.gain.exponentialRampToValueAtTime(.35,a+.02);g.gain.exponentialRampToValueAtTime(.0001,e);o.start(a);o.stop(e+.05)})}catch(e){}}
-function winSound(){if(!snd_on)return;stopVoice();try{const a=new Audio("bingo.m4a");a.onerror=fanfare;const p=a.play();if(p&&p.catch)p.catch(fanfare)}catch(e){fanfare()}}
+function winSound(){if(!snd_on)return;stopVoice();const c=AC,b=_buf.bingo;if(c&&b){try{if(c.state!=="running")c.resume();const s=c.createBufferSource();s.buffer=b;s.connect(c.destination);s.start(0);return}catch(e){}}fanfare()}
 function snd(){snd_on=!snd_on;if(!snd_on)stopVoice();$("sb").textContent=snd_on?"🔊":"🔇"}
 
 /* flow */
@@ -276,5 +287,6 @@ async function toggleAuto(){const a=!S.auto;S.auto=a;drawGame();try{await api("/
 async function claim(){try{S=await api("/api/bingo",{});off=S.now-Date.now();render()}catch(e){toast(e==="no_bingo"?"❌ No bingo yet":e==="round_over"?"Round already finished":(ERR[e]||e))}}
 function cp(t,e){if(e)e.stopPropagation();const ok=()=>toast("✅ Copied "+t);function fb(){const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();try{document.execCommand("copy");ok()}catch(x){}a.remove()}try{navigator.clipboard.writeText(t).then(ok,fb)}catch(x){fb()}}
 buildBoard();
+preload();
 boot();
 </script></body></html>
