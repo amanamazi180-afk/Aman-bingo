@@ -181,7 +181,9 @@ const ensureTables = async env => { if (tablesReady) return; await env.DB.batch(
   env.DB.prepare('CREATE TABLE IF NOT EXISTS bans(id INTEGER PRIMARY KEY)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT,ts INTEGER,actor TEXT,action TEXT,detail TEXT)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS bot_state(uid INTEGER PRIMARY KEY,step TEXT,data TEXT,ts INTEGER)'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS referrals(user_id INTEGER PRIMARY KEY,ref_id INTEGER,ts INTEGER)')]); tablesReady = true };
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS referrals(user_id INTEGER PRIMARY KEY,ref_id INTEGER,ts INTEGER)')]);
+  try { await env.DB.prepare('SELECT auto_off FROM users LIMIT 1').first() } catch (e) { try { await env.DB.prepare('ALTER TABLE users ADD COLUMN auto_off INTEGER DEFAULT 0').run() } catch (e2) { } }
+  tablesReady = true };
 const cfg = { t: 0, set: {}, bans: new Set() }; // settings and bans are cached for 5 seconds to keep requests fast
 const loadCfg = async env => { if (Date.now() - cfg.t < 5000) return cfg; await ensureTables(env); const [a, b] = await env.DB.batch([env.DB.prepare('SELECT k,v FROM settings'), env.DB.prepare('SELECT id FROM bans')]); cfg.set = Object.fromEntries(a.results.map(r => [r.k, r.v])); cfg.bans = new Set(b.results.map(r => String(r.id))); cfg.t = Date.now(); return cfg };
 const getSet = async (env, k) => (await loadCfg(env)).set[k] ?? null;
@@ -197,13 +199,13 @@ let rcache = null;
 async function roundCache(env, r) {
   if (rcache && rcache.id === r.id) return rcache;
   const picks = (await env.DB.prepare('SELECT p.cartela,p.user_id,u.name FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=?').bind(r.id).all()).results;
-  return rcache = { id: r.id, picks, order: numberOrder(r.seed), cards: null, k: 0, marked: new Set(), win: null };
+  return rcache = { id: r.id, picks, order: numberOrder(r.seed), cards: null, k: 0, marked: new Set(), win: null, manual: new Set(), mt: 0 };
 }
 function winnersAt(rc, k) { // same result as findWinners(order, picks, k), but remembers how far it already checked
   if (!rc.cards) rc.cards = rc.picks.map(p => makeCard(p.cartela));
   while (!rc.win && rc.k < k) {
     rc.marked.add(rc.order[rc.k]); rc.k++;
-    const w = rc.picks.filter((_, i) => hasBingo(rc.cards[i], rc.marked));
+    const w = rc.picks.filter((p, i) => !rc.manual.has(p.user_id) && hasBingo(rc.cards[i], rc.marked));
     if (w.length) rc.win = { k: rc.k, picks: w };
   }
   return rc.win;
@@ -213,6 +215,16 @@ function refundAndClose(env, r, from, now) {
   return db.batch([
     db.prepare("UPDATE users SET bonus_c=MIN(?5,bonus_c+(SELECT COALESCE(SUM(p.bonus_c),0) FROM picks p WHERE p.round_id=?1 AND p.user_id=users.id)),balance=balance+(SELECT COUNT(*)*?2-COALESCE(SUM(p.bonus_c),0) FROM picks p WHERE p.round_id=?1 AND p.user_id=users.id) WHERE id IN(SELECT user_id FROM picks WHERE round_id=?1) AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status=?4)").bind(r.id, r.stake_c, now, from, bonusC(env)),
     db.prepare("UPDATE rounds SET status='cancelled',ended_ts=?3 WHERE id=?1 AND status=?2").bind(r.id, from, now)]);
+}
+async function refreshManual(env, r, rc, now) { // players with Automatic switched off (re-read at most every 2 seconds)
+  if (now - rc.mt < 2000) return; rc.mt = now;
+  rc.manual = new Set((await env.DB.prepare('SELECT DISTINCT p.user_id FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=? AND u.auto_off=1').bind(r.id).all()).results.map(x => x.user_id));
+}
+async function settle(env, r, picks, w, now) { // pays the winners and ends the round; returns false if another request already did
+  const db = env.DB, prize = Math.floor(picks.length * r.stake_c * CUT), share = Math.floor(prize / w.picks.length);
+  const res = await db.batch([...w.picks.map(p => db.prepare("UPDATE users SET balance=balance+?3 WHERE id=?2 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running')").bind(r.id, p.user_id, share)),
+    db.prepare("UPDATE rounds SET status='ended',ended_ts=?2,called_n=?3,winners=?4 WHERE id=?1 AND status='running'").bind(r.id, now, w.k, JSON.stringify(w.picks.map(p => p.cartela)))]);
+  return res[res.length - 1].meta.changes > 0;
 }
 async function advance(env) {
   const db = env.DB, now = Date.now(); let r = await latest(db);
@@ -230,11 +242,10 @@ async function advance(env) {
   }
   if (r.status === 'running') {
     const k = callsAt(r, now), rc = await roundCache(env, r), picks = rc.picks;
+    await refreshManual(env, r, rc, now);
     const w = winnersAt(rc, k);
     if (w) {
-      const prize = Math.floor(picks.length * r.stake_c * CUT), share = Math.floor(prize / w.picks.length);
-      await db.batch([...w.picks.map(p => db.prepare("UPDATE users SET balance=balance+?3 WHERE id=?2 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running')").bind(r.id, p.user_id, share)),
-        db.prepare("UPDATE rounds SET status='ended',ended_ts=?2,called_n=?3,winners=?4 WHERE id=?1 AND status='running'").bind(r.id, now, w.k, JSON.stringify(w.picks.map(p => p.cartela)))]);
+      await settle(env, r, picks, w, now);
     } else if (k >= 75) await refundAndClose(env, r, 'running', now);
     r = await db.prepare('SELECT * FROM rounds WHERE id=?').bind(r.id).first();
   }
@@ -255,7 +266,7 @@ async function stateFor(env, u, round) {
   return { now, round: { id: r.id, status: r.status, start_ts: r.start_ts, lobby_ms: LOBBY_MS, call_ms: CALL_MS, stake: B(r.stake_c), rest_ms: REST_MS, ended_ts: r.ended_ts },
     taken: picks.map(p => p.cartela), mine: picks.filter(p => p.user_id === u.id).map(p => p.cartela),
     called: n && rc ? rc.order.slice(0, n) : [], players: new Set(picks.map(p => p.user_id)).size, cards: picks.length,
-    derash: B(Math.floor(picks.length * r.stake_c * CUT)), winners: picks.filter(p => win.includes(p.cartela)).map(p => ({ cartela: p.cartela, name: p.name })), balance: B(me.balance), bonus: B(me.bonus_c) };
+    auto: !u.auto_off, derash: B(Math.floor(picks.length * r.stake_c * CUT)), winners: picks.filter(p => win.includes(p.cartela)).map(p => ({ cartela: p.cartela, name: p.name })), balance: B(me.balance), bonus: B(me.bonus_c) };
 }
 const startOfDay = () => Math.floor((Date.now() + 3 * 36e5) / 864e5) * 864e5 - 3 * 36e5; // Ethiopia time (UTC+3)
 async function leaderboard(env, u, period) {
@@ -554,6 +565,20 @@ async function route(req, env, url) {
   if (p === '/api/state') return J(await stateFor(env, u));
   if (p === '/api/leaderboard') return J(await leaderboard(env, u, url.searchParams.get('period')));
   const bad = need(); if (bad) return bad;
+  if (p === '/api/auto') { // Automatic on/off for this player
+    await db.prepare('UPDATE users SET auto_off=?1 WHERE id=?2').bind(b.auto ? 0 : 1, u.id).run();
+    return J({ ok: true, auto: !!b.auto });
+  }
+  if (p === '/api/bingo') { // manual BINGO button: wins only if one of your cartelas really is complete right now
+    const r = await advance(env);
+    if (r.status === 'ended' || r.status === 'cancelled') return J({ error: 'round_over' }, 409);
+    if (r.status !== 'running') return J({ error: 'no_bingo' }, 409);
+    const rc = await roundCache(env, r), k = callsAt(r, now), marked = new Set(rc.order.slice(0, k));
+    const mine = rc.picks.filter(x => x.user_id === u.id && hasBingo(makeCard(x.cartela), marked));
+    if (!mine.length) return J({ error: 'no_bingo' }, 409);
+    if (!(await settle(env, r, rc.picks, { k, picks: mine }, now))) return J({ error: 'round_over' }, 409);
+    return J(await stateFor(env, u, await db.prepare('SELECT * FROM rounds WHERE id=?').bind(r.id).first()));
+  }
   if (p === '/api/pick' || p === '/api/unpick') {
     const r = await advance(env), no = Math.floor(Number(b.cartela)); if (!(no >= 1 && no <= TOTAL)) return J({ error: 'bad_input' }, 400);
     if (r.status !== 'lobby' || now - r.start_ts >= LOBBY_MS) return J({ error: 'round_closed' }, 409);
