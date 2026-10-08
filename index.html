@@ -140,13 +140,17 @@ function cardHTML(no,cl,hl,last){const c=mk(no);let h='<div class="card">'+[..."
 const _a={};let _cur=null,_q=[],_playing=false,_vt=0,_unl=false;
 function aud(n){if(!_a[n]){const a=new Audio(n+".m4a");a.preload="auto";a.setAttribute("playsinline","");_a[n]=a}return _a[n]}
 function preload(){for(let n=1;n<=75;n++)try{aud(n).load()}catch(e){}}
-function unlock(){if(_unl)return;_unl=true;try{const a=aud(1);a.muted=true;const p=a.play();const done=()=>{try{a.pause();a.currentTime=0}catch(e){}a.muted=false};if(p&&p.then)p.then(done,()=>{a.muted=false;_unl=false});else done()}catch(e){_unl=false}}
+let AC=null,wonSnd=0;
+function unlock(){try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")AC.resume()}catch(e){}if(_unl)return;_unl=true;try{const a=aud(1);a.muted=true;const p=a.play();const done=()=>{try{a.pause();a.currentTime=0}catch(e){}a.muted=false};if(p&&p.then)p.then(done,()=>{a.muted=false;_unl=false});else done()}catch(e){_unl=false}}
 function stopVoice(){_q=[];_playing=false;clearTimeout(_vt);if(_cur){try{_cur.pause()}catch(e){}_cur=null}}
 function nextVoice(){clearTimeout(_vt);const n=_q.shift();if(n===undefined){_playing=false;return}
   _playing=true;const a=aud(n);_cur=a;a.onended=a.onerror=()=>{a.onended=a.onerror=null;nextVoice()};
   _vt=setTimeout(()=>{try{a.pause()}catch(e){}nextVoice()},8000);
   try{a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(()=>nextVoice())}catch(e){nextVoice()}}
 function playNum(n){if(!snd_on)return;_q.push(n);if(_q.length>3)_q.shift();if(!_playing)nextVoice()}
+/* winner sound: plays bingo.m4a if you add that file next to index.html, otherwise a built-in fanfare */
+function fanfare(){try{if(!AC)return;if(AC.state==="suspended")AC.resume();const t=AC.currentTime;[[523,0],[659,.14],[784,.28],[1047,.42],[784,.62],[1047,.76],[1319,.9]].forEach(([f,d],i)=>{const o=AC.createOscillator(),g=AC.createGain();o.type="triangle";o.frequency.value=f;o.connect(g);g.connect(AC.destination);const a=t+d,e=a+(i===6?.9:.18);g.gain.setValueAtTime(.0001,a);g.gain.exponentialRampToValueAtTime(.35,a+.02);g.gain.exponentialRampToValueAtTime(.0001,e);o.start(a);o.stop(e+.05)})}catch(e){}}
+function winSound(){if(!snd_on)return;stopVoice();try{const a=new Audio("bingo.m4a");a.onerror=fanfare;const p=a.play();if(p&&p.catch)p.catch(fanfare)}catch(e){fanfare()}}
 function snd(){snd_on=!snd_on;if(!snd_on)stopVoice();$("sb").textContent=snd_on?"🔊":"🔇"}
 
 /* flow */
@@ -236,6 +240,7 @@ function drawGame(){
   if(r.status==="ended"||r.status==="cancelled"){
     const sec=Math.max(0,Math.ceil((r.rest_ms-(Date.now()+off-r.ended_ts))/1000));ov.classList.add("on");
     if(r.status==="ended"){const w=S.winners,me=w.some(x=>S.mine.includes(x.cartela));
+      if(me&&wonSnd!==r.id){wonSnd=r.id;winSound()}
       $("wt").textContent=me?"🎉 YOU WON!":"BINGO!";$("wn").textContent=w.map(x=>x.name).join(", ")+" won "+F(S.derash/w.length)+" birr";
       $("wc").innerHTML=w.length?`<div class="cn">CARTELA #${w[0].cartela}</div>`+cardHTML(w[0].cartela,cl,winLine(mk(w[0].cartela),cl)):""}
     else{$("wt").textContent="Round cancelled";$("wn").textContent="Not enough players. Your stake was refunded.";$("wc").innerHTML=""}
