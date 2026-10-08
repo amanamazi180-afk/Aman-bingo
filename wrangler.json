@@ -9,6 +9,14 @@
       "database_id": "8ccd460d-f739-4e9d-8c42-82c4b28cfcd4"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "HUB", "class_name": "GameHub" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["GameHub"] }
+  ],
   "vars": {
     "GAME_URL": "https://amanamazi180-afk.github.io/Aman-bingo/",
     "ALLOW_ORIGIN": "https://amanamazi180-afk.github.io",

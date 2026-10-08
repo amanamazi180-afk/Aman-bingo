@@ -1,7 +1,9 @@
-// Aman Bingo server — Cloudflare Worker + D1 database.
+// Aman Bingo server — Cloudflare Worker + D1 database + one Durable Object (GameHub) that runs the live game.
 // Money is stored in cents (birr x 100). Variables to set in Cloudflare:
 //   BOT_TOKEN, ADMIN_TG_ID, SMS_SECRET, TG_SECRET, ADMIN_KEY (secrets) · GAME_URL, ALLOW_ORIGIN, STAKE (plain variables)
 //   Optional: CBE_ACCOUNT (e.g. "1000123456789 (AMANUEL YISMAH)" — the CBE button appears only when this is set), BOT_USERNAME, WELCOME_BONUS, DAILY_BONUS, ADMIN_URL, PROMO_PHOTO
+// wrangler.json needs the HUB binding + migration for GameHub (see the two blocks given with this file).
+import { DurableObject } from 'cloudflare:workers';
 const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 400, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
 const welcomeC = env => C(env.WELCOME_BONUS ?? 10); // one-time gift when a player registers
@@ -190,7 +192,7 @@ const getSet = async (env, k) => (await loadCfg(env)).set[k] ?? null;
 const setSet = async (env, k, v) => { await ensureTables(env); await env.DB.prepare('INSERT INTO settings(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v').bind(k, v).run(); cfg.t = 0 };
 const isBanned = async (env, id) => (await loadCfg(env)).bans.has(String(id));
 
-/* ---------- shared game rounds (advanced lazily on every request) ---------- */
+/* ---------- shared game rounds (advanced only inside the GameHub Durable Object) ---------- */
 const latest = db => db.prepare('SELECT * FROM rounds ORDER BY id DESC LIMIT 1').first();
 const callsAt = (r, now) => Math.min(75, Math.max(0, Math.floor((now - r.start_ts - LOBBY_MS) / CALL_MS) + 1));
 // Once a round has started its picks and number order never change, so they are kept in memory
@@ -251,23 +253,87 @@ async function advance(env) {
   }
   return r;
 }
-async function stateFor(env, u, round) {
-  const db = env.DB, r = round || await advance(env), now = Date.now();
-  let picks, me, rc = null;
-  if (r.status === 'lobby') { // picks still change in the lobby, so read them fresh
-    const [pr, mr] = await db.batch([db.prepare('SELECT p.cartela,p.user_id,u.name FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=?').bind(r.id), db.prepare('SELECT balance,bonus_c FROM users WHERE id=?').bind(u.id)]);
-    picks = pr.results; me = mr.results[0];
-  } else { // running / ended / cancelled: picks are final, use the in-memory copy
-    [rc, me] = await Promise.all([roundCache(env, r), db.prepare('SELECT balance,bonus_c FROM users WHERE id=?').bind(u.id).first()]);
-    picks = rc.picks;
+
+/* ---------- GameHub: ONE Durable Object that holds the live game in memory ----------
+   Every player poll is answered from memory. The database is touched only when something really changes:
+   a round starts / ends, a number is called, a player picks or drops a cartela, or money moves.
+   All the truth is still in D1, so if this object is ever restarted it rebuilds itself from the database. */
+export class GameHub extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.round = null; this.picks = []; this.pickRound = 0; this.pv = 0; this.pt = 0; this.nextAt = 0; this.busy = null; this.sh = null;
   }
-  const n = r.status === 'running' ? callsAt(r, now) : r.status === 'ended' ? r.called_n : 0;
-  const win = r.status === 'ended' ? JSON.parse(r.winners || '[]') : [];
-  return { now, round: { id: r.id, status: r.status, start_ts: r.start_ts, lobby_ms: LOBBY_MS, call_ms: CALL_MS, stake: B(r.stake_c), rest_ms: REST_MS, ended_ts: r.ended_ts },
-    taken: picks.map(p => p.cartela), mine: picks.filter(p => p.user_id === u.id).map(p => p.cartela),
-    called: n && rc ? rc.order.slice(0, n) : [], players: new Set(picks.map(p => p.user_id)).size, cards: picks.length,
-    auto: !u.auto_off, derash: B(Math.floor(picks.length * r.stake_c * CUT)), winners: picks.filter(p => win.includes(p.cartela)).map(p => ({ cartela: p.cartela, name: p.name })), balance: B(me.balance), bonus: B(me.bonus_c) };
+  async sync() { // returns the current round; asks the database only when the next event is due
+    const now = Date.now();
+    if (this.round && now < this.nextAt && !(this.round.status === 'lobby' && now - this.pt > 20000)) return this.round;
+    if (!this.busy) this.busy = this.refresh().finally(() => { this.busy = null });
+    await this.busy; return this.round;
+  }
+  async refresh() {
+    const env = this.env, r = await advance(env), now = Date.now();
+    if (r.status === 'lobby') {
+      if (this.pickRound !== r.id || now - this.pt > 20000) await this.loadLobby(r);
+    } else {
+      const rc = await roundCache(env, r);
+      if (this.picks !== rc.picks) { this.picks = rc.picks; this.pv++ }
+      this.pickRound = r.id;
+    }
+    const k = r.status === 'running' ? callsAt(r, now) : 0;
+    const due = r.status === 'lobby' ? r.start_ts + LOBBY_MS : r.status === 'running' ? r.start_ts + LOBBY_MS + k * CALL_MS : r.ended_ts + REST_MS;
+    this.nextAt = Math.max(due, now + (r.status === 'running' ? 250 : 1000));
+    this.round = r;
+  }
+  async loadLobby(r) {
+    const v = this.pv;
+    const rows = (await this.env.DB.prepare('SELECT p.cartela,p.user_id,u.name FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=?').bind(r.id).all()).results;
+    if (this.pickRound !== r.id || v === this.pv) { this.picks = rows; this.pickRound = r.id; this.pv++ } // a pick that arrived while reading wins over the older read
+    this.pt = Date.now();
+  }
+  async current() { return this.sync() } // the current round row, kept fresh
+  async state(me) { // same JSON the old stateFor produced; me = { id, auto_off, balance, bonus_c } read fresh by the caller
+    const r = await this.sync(), now = Date.now();
+    const n = r.status === 'running' ? callsAt(r, now) : r.status === 'ended' ? r.called_n : 0;
+    const key = r.id + '|' + r.status + '|' + this.pv + '|' + n;
+    let sh = this.sh;
+    if (!sh || sh.key !== key) {
+      const picks = this.picks, by = new Map();
+      for (const p of picks) { let a = by.get(p.user_id); if (!a) by.set(p.user_id, a = []); a.push(p.cartela) }
+      const win = r.status === 'ended' ? JSON.parse(r.winners || '[]') : [];
+      const called = n ? (await roundCache(this.env, r)).order.slice(0, n) : [];
+      sh = this.sh = { key, by, called, taken: picks.map(p => p.cartela), players: by.size, cards: picks.length,
+        derash: B(Math.floor(picks.length * r.stake_c * CUT)), winners: picks.filter(p => win.includes(p.cartela)).map(p => ({ cartela: p.cartela, name: p.name })) };
+    }
+    return { now, round: { id: r.id, status: r.status, start_ts: r.start_ts, lobby_ms: LOBBY_MS, call_ms: CALL_MS, stake: B(r.stake_c), rest_ms: REST_MS, ended_ts: r.ended_ts },
+      taken: sh.taken, mine: sh.by.get(me.id) || [], called: sh.called, players: sh.players, cards: sh.cards,
+      auto: !me.auto_off, derash: sh.derash, winners: sh.winners, balance: B(me.balance), bonus: B(me.bonus_c) };
+  }
+  async picked(op, roundId, no, uid, name, me) { // the database already accepted this pick / unpick: update memory and answer
+    if (this.round && this.round.id === roundId && this.round.status === 'lobby' && this.pickRound === roundId) {
+      if (op === 'pick') { if (!this.picks.some(p => p.cartela === no)) this.picks.push({ cartela: no, user_id: uid, name }) }
+      else this.picks = this.picks.filter(p => !(p.cartela === no && p.user_id === uid));
+      this.pv++;
+    }
+    return this.state(me);
+  }
+  async bingo(me) { // manual BINGO button: wins only if one of your cartelas really is complete right now
+    const r = await this.sync(), now = Date.now();
+    if (r.status === 'ended' || r.status === 'cancelled') return { error: 'round_over' };
+    if (r.status !== 'running') return { error: 'no_bingo' };
+    const rc = await roundCache(this.env, r), k = callsAt(r, now), marked = new Set(rc.order.slice(0, k));
+    const mine = rc.picks.filter(x => x.user_id === me.id && hasBingo(makeCard(x.cartela), marked));
+    if (!mine.length) return { error: 'no_bingo' };
+    if (!(await settle(this.env, r, rc.picks, { k, picks: mine }, now))) return { error: 'round_over' };
+    this.nextAt = 0;
+    const f = await this.env.DB.prepare('SELECT balance,bonus_c,auto_off FROM users WHERE id=?').bind(me.id).first();
+    return { state: await this.state({ id: me.id, auto_off: f.auto_off, balance: f.balance, bonus_c: f.bonus_c }) };
+  }
+  async manualChanged() { if (rcache) rcache.mt = 0; this.nextAt = 0 } // a player switched Automatic on/off
+  async invalidate() { this.nextAt = 0; cfg.t = 0 } // admin changed something: re-read on the next request
 }
+const hubOf = env => env.HUB.get(env.HUB.idFromName('main'));
+const noHub = () => J({ error: 'server_error', detail: 'HUB binding is missing in wrangler.json' }, 500);
+const poke = env => env.HUB ? hubOf(env).invalidate().catch(() => { }) : null;
+
 const startOfDay = () => Math.floor((Date.now() + 3 * 36e5) / 864e5) * 864e5 - 3 * 36e5; // Ethiopia time (UTC+3)
 async function leaderboard(env, u, period) {
   const db = env.DB, since = period === 'weekly' ? Date.now() - 7 * 864e5 : startOfDay();
@@ -509,11 +575,11 @@ async function adminRoute(req, env, url) {
   }
   if (name === 'set-stake') {
     const st = Number(b.stake); if (!(st >= 1 && st <= 1000)) return J({ error: 'bad_input' }, 400);
-    await setSet(env, 'stake', String(st)); await log('set stake', st + ' birr (from the next round)');
+    await setSet(env, 'stake', String(st)); await log('set stake', st + ' birr (from the next round)'); await poke(env);
     return J({ ok: true, stake: st });
   }
   if (name === 'pause') {
-    await setSet(env, 'paused', b.paused ? '1' : '0'); await log(b.paused ? 'pause game' : 'resume game', '');
+    await setSet(env, 'paused', b.paused ? '1' : '0'); await log(b.paused ? 'pause game' : 'resume game', ''); await poke(env);
     return J({ ok: true, paused: !!b.paused });
   }
   if (name === 'log') {
@@ -521,10 +587,11 @@ async function adminRoute(req, env, url) {
     return J({ items: r });
   }
   if (name === 'game' || name === 'game-start' || name === 'game-stop') {
-    let r = await advance(env);
+    if (!env.HUB) return noHub();
+    const hub = hubOf(env); let r = await hub.current();
     if (name === 'game-stop' && (r.status === 'lobby' || r.status === 'running')) {
       await refundAndClose(env, r, r.status, Date.now()); // cancels the round and returns every stake
-      await log('cancel round', 'round ' + r.id); r = await advance(env);
+      await log('cancel round', 'round ' + r.id); await hub.invalidate(); r = await hub.current();
     }
     const c = await db.prepare('SELECT COUNT(DISTINCT user_id) p,COUNT(*) c FROM picks WHERE round_id=?').bind(r.id).first();
     return J({ ok: true, status: r.status, round: r.id, stake: B(r.stake_c), next_stake: Number((await getSet(env, 'stake')) || env.STAKE || 10), paused: (await getSet(env, 'paused')) === '1', players: c.p, cards: c.c });
@@ -548,8 +615,7 @@ async function route(req, env, url) {
   if (!p.startsWith('/api/')) return J({ error: 'not_found' }, 404);
   if (p.startsWith('/api/admin/')) return adminRoute(req, env, url);
   const tu = await verifyInit(req.headers.get('x-init-data'), env.BOT_TOKEN); if (!tu) return J({ error: 'unauthorized' }, 401);
-  // Look the player up with a plain read first. The old code ran an INSERT and an UPDATE on every request, which
-  // made every poll a database write; now a write happens only for a brand-new player or when the bonus period changes.
+  // Look the player up with a plain read first. A write happens only for a brand-new player or when the bonus period changes.
   const selUser = () => db.prepare('SELECT * FROM users WHERE id=?').bind(tu.id);
   let u = await selUser().first();
   if (!u) u = (await db.batch([db.prepare('INSERT INTO users(id,name,created_ts) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').bind(tu.id, tu.first_name || 'player', now), refreshBonusStmt(env, tu.id, now), selUser()]))[2].results[0];
@@ -562,25 +628,27 @@ async function route(req, env, url) {
     try { const rr = await db.prepare("UPDATE users SET name=?1,phone=?2,balance=balance+?3 WHERE id=?4 AND (phone IS NULL OR phone='')").bind(nm, ph, welcomeC(env), u.id).run(); if (!rr.meta.changes) return J({ error: 'already_registered' }, 409) } catch (e) { return J({ error: 'phone_used' }, 409) }
     if (welcomeC(env) > 0) await say(env, u.id, `🎉 እንኳን ደስ አለዎት! በተሳካ ሁኔታ ተመዝግበዋል። ${B(welcomeC(env))} ብር ወደ ዋሌትዎ ተጨምሯል።`, playKb(env));
     return J({ ok: true }) }
-  if (p === '/api/state') return J(await stateFor(env, u));
+  if (p === '/api/state') { // the hot path: answered from the GameHub's memory, no database work beyond the player lookup above
+    if (!env.HUB) return noHub();
+    return J(await hubOf(env).state({ id: u.id, auto_off: u.auto_off, balance: u.balance, bonus_c: u.bonus_c }));
+  }
   if (p === '/api/leaderboard') return J(await leaderboard(env, u, url.searchParams.get('period')));
   const bad = need(); if (bad) return bad;
   if (p === '/api/auto') { // Automatic on/off for this player
     await db.prepare('UPDATE users SET auto_off=?1 WHERE id=?2').bind(b.auto ? 0 : 1, u.id).run();
+    if (env.HUB) await hubOf(env).manualChanged().catch(() => { });
     return J({ ok: true, auto: !!b.auto });
   }
-  if (p === '/api/bingo') { // manual BINGO button: wins only if one of your cartelas really is complete right now
-    const r = await advance(env);
-    if (r.status === 'ended' || r.status === 'cancelled') return J({ error: 'round_over' }, 409);
-    if (r.status !== 'running') return J({ error: 'no_bingo' }, 409);
-    const rc = await roundCache(env, r), k = callsAt(r, now), marked = new Set(rc.order.slice(0, k));
-    const mine = rc.picks.filter(x => x.user_id === u.id && hasBingo(makeCard(x.cartela), marked));
-    if (!mine.length) return J({ error: 'no_bingo' }, 409);
-    if (!(await settle(env, r, rc.picks, { k, picks: mine }, now))) return J({ error: 'round_over' }, 409);
-    return J(await stateFor(env, u, await db.prepare('SELECT * FROM rounds WHERE id=?').bind(r.id).first()));
+  if (p === '/api/bingo') { // manual BINGO button
+    if (!env.HUB) return noHub();
+    const r = await hubOf(env).bingo({ id: u.id });
+    if (r.error) return J({ error: r.error }, 409);
+    return J(r.state);
   }
   if (p === '/api/pick' || p === '/api/unpick') {
-    const r = await advance(env), no = Math.floor(Number(b.cartela)); if (!(no >= 1 && no <= TOTAL)) return J({ error: 'bad_input' }, 400);
+    if (!env.HUB) return noHub();
+    const no = Math.floor(Number(b.cartela)); if (!(no >= 1 && no <= TOTAL)) return J({ error: 'bad_input' }, 400);
+    const hub = hubOf(env), r = await hub.current();
     if (r.status !== 'lobby' || now - r.start_ts >= LOBBY_MS) return J({ error: 'round_closed' }, 409);
     if (p === '/api/pick' && (await getSet(env, 'paused')) === '1') return J({ error: 'paused' }, 409);
     try {
@@ -593,7 +661,8 @@ async function route(req, env, url) {
         db.prepare("UPDATE users SET bonus_c=MIN(?5,bonus_c+(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)),balance=balance+(?4-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)) WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3) AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id, r.stake_c, bonusC(env)),
         db.prepare("DELETE FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id)]);
     } catch (e) { return J({ error: errOf(e) }, 409) }
-    return J(await stateFor(env, u, r));
+    const me = await db.prepare('SELECT id,auto_off,balance,bonus_c FROM users WHERE id=?').bind(u.id).first(); // fresh balance after the stake moved
+    return J(await hub.picked(p === '/api/pick' ? 'pick' : 'unpick', r.id, no, u.id, u.name, me));
   }
   if (p === '/api/deposit') {
     const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = ['telebirr', 'cbe', 'boa', 'dashen'].includes(b.method) ? b.method : 'telebirr';
