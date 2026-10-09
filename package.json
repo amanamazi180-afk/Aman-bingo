@@ -1,0 +1,11 @@
+{
+  "name": "aman-bingo-test-tools",
+  "private": true,
+  "scripts": {
+    "1-whoami": "npx --yes wrangler whoami",
+    "2-deploy": "npx --yes wrangler deploy --config wrangler.test.json",
+    "3-secrets": "npx --yes wrangler secret bulk secrets.test.json --config wrangler.test.json",
+    "4-seed50": "node loadtest.mjs seed 50 > seed.sql && npx --yes wrangler d1 execute aman-bingo-test-db --remote --config wrangler.test.json --file=seed.sql",
+    "5-test50": "node loadtest.mjs run https://aman-bingo-test.YOUR-SUBDOMAIN.workers.dev 123456:TESTTOKEN 50"
+  }
+}
