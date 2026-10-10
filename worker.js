@@ -43,7 +43,8 @@ const FT = s => String(s).toUpperCase().slice(0, 12); // bank references (FT…)
 // Reads a "money received" SMS. Returns { bank, amount_c, txid } or null (money-sent messages and anything else are ignored).
 //  Telebirr: "… 300.00 ብር በ 10/10/2026 11:14:57 ተቀብለዋል። የሂሳብ እንቅስቃሴ ቁጥርዎ DJA8MMWD4O ነዉ።"
 //  BOA:      "… was credited with ETB 50.00 by NAME … Receipt: https://cs.bankofabyssinia.com/slip/?trx=FT2627850CY910104"
-//  Dashen:   "… credited with ETB 40.00 … on 05/10/2026 at 11:24:14 PM. Your current balance is ETB 303.20." (Dashen SMS has no reference number, so the id is built from date + time + balance)
+//  Dashen 1: "You have received ETB 6,000.00 from NAME on 2026-09-29 at 09:48:09 with transaction reference: 112WDTS262720002." (has a reference number)
+//  Dashen 2: "… credited with ETB 40.00 … on 05/10/2026 at 11:24:14 PM. Your current balance is ETB 303.20." (no reference number, so the id is built from date + time + balance)
 //  CBE:      "… Credited with ETB … Ref No FT26283XXXXX …" (format not tested with a real sample yet)
 export function parseBank(t) {
   t = String(t || '');
@@ -54,6 +55,8 @@ export function parseBank(t) {
   }
   a = t.match(/you\s+have\s+received\s+ETB\s*([\d,]+(?:\.\d+)?)/i); i = t.match(/transaction\s*(?:number|id|no\.?)\s*(?:is|:)?\s*([A-Z0-9]{8,14})/i);
   if (a && i) return { bank: 'telebirr', amount_c: C(toNum(a[1])), txid: i[1].toUpperCase() }; // Telebirr (English)
+  a = t.match(/received\s+ETB\s*([\d,]+(?:\.\d+)?)/i); i = t.match(/transaction\s*reference\s*[:.]?\s*([A-Z0-9]{8,24})/i);
+  if (a && i) return { bank: 'dashen', amount_c: C(toNum(a[1])), txid: i[1].toUpperCase() }; // Dashen "You have received ETB … with transaction reference: …"
   a = t.match(/credited\s+with\s+ETB\s*([\d,]+(?:\.\d+)?)/i); // Dashen, BOA and CBE all say "credited with ETB …"
   if (!a) return null;
   const amount_c = C(toNum(a[1]));
