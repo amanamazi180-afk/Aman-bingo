@@ -3,6 +3,9 @@
 //   BOT_TOKEN, ADMIN_TG_ID, SMS_SECRET, TG_SECRET, ADMIN_KEY (secrets) · GAME_URL, ALLOW_ORIGIN, STAKE (plain variables)
 //   Optional: CBE_ACCOUNT (e.g. "1000123456789 (AMANUEL YISMAH)" — the CBE button appears only when this is set), BOT_USERNAME, WELCOME_BONUS, DAILY_BONUS, ADMIN_URL, PROMO_PHOTO
 // wrangler.json needs the HUB binding + migration for GameHub (see the two blocks given with this file).
+// Deposit verification: the player pastes the bank SMS in the bot. The Worker reads the amount + transaction number (Telebirr, Dashen, BOA, CBE)
+// and credits the balance automatically when the SAME SMS was forwarded to POST /sms by the SMS-forwarder app on the receiving phone.
+// If that SMS has not arrived yet, the deposit waits (and is also sent to the admins) and is credited the moment the SMS arrives.
 import { DurableObject } from 'cloudflare:workers';
 const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 400, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
@@ -33,18 +36,44 @@ export function findWinners(order, picks, k) {
   for (let kk = 1; kk <= k; kk++) { marked.add(order[kk - 1]); const w = picks.filter((_, i) => hasBingo(cards[i], marked)); if (w.length) return { k: kk, picks: w } }
   return null;
 }
-export function parseSms(t) { // Telebirr "received" message
+
+/* ---------- deposit SMS reading: Telebirr, Dashen, BOA, CBE ---------- */
+const toNum = s => Number(String(s).replace(/,/g, ''));
+const FT = s => String(s).toUpperCase().slice(0, 12); // bank references (FT…) are keyed by their first 12 characters, so a receipt link and a feedback link of the same payment give the same id
+// Reads a "money received" SMS. Returns { bank, amount_c, txid } or null (money-sent messages and anything else are ignored).
+//  Telebirr: "… 300.00 ብር በ 10/10/2026 11:14:57 ተቀብለዋል። የሂሳብ እንቅስቃሴ ቁጥርዎ DJA8MMWD4O ነዉ።"
+//  BOA:      "… was credited with ETB 50.00 by NAME … Receipt: https://cs.bankofabyssinia.com/slip/?trx=FT2627850CY910104"
+//  Dashen:   "… credited with ETB 40.00 … on 05/10/2026 at 11:24:14 PM. Your current balance is ETB 303.20." (Dashen SMS has no reference number, so the id is built from date + time + balance)
+//  CBE:      "… Credited with ETB … Ref No FT26283XXXXX …" (format not tested with a real sample yet)
+export function parseBank(t) {
   t = String(t || '');
-  const amt = t.match(/([\d,]+(?:\.\d+)?)\s*ብር\s*በ\s*\d{2}\/\d{2}\/\d{4}/), id = t.match(/ቁጥርዎ\s+([A-Z0-9]{8,14})/i);
-  if (!amt || !id || !/ተቀብለዋል/.test(t)) return null;
-  return { amount_c: C(amt[1].replace(/,/g, '')), txid: id[1].toUpperCase() };
+  let a, i, m;
+  if (/ተቀብለዋል/.test(t)) { // Telebirr (Amharic)
+    a = t.match(/([\d,]+(?:\.\d+)?)\s*ብር\s*በ\s*\d{2}\/\d{2}\/\d{4}/); i = t.match(/ቁጥርዎ\s+([A-Z0-9]{8,14})/i);
+    if (a && i) return { bank: 'telebirr', amount_c: C(toNum(a[1])), txid: i[1].toUpperCase() };
+  }
+  a = t.match(/you\s+have\s+received\s+ETB\s*([\d,]+(?:\.\d+)?)/i); i = t.match(/transaction\s*(?:number|id|no\.?)\s*(?:is|:)?\s*([A-Z0-9]{8,14})/i);
+  if (a && i) return { bank: 'telebirr', amount_c: C(toNum(a[1])), txid: i[1].toUpperCase() }; // Telebirr (English)
+  a = t.match(/credited\s+with\s+ETB\s*([\d,]+(?:\.\d+)?)/i); // Dashen, BOA and CBE all say "credited with ETB …"
+  if (!a) return null;
+  const amount_c = C(toNum(a[1]));
+  m = t.match(/slip\/\s*\?trx=\s*([A-Z0-9]{8,24})/i) || t.match(/cs\/\s*\?trx=\s*[A-Z]?(FT[A-Z0-9]{8,22})/i); // BOA
+  if (m) return { bank: 'boa', amount_c, txid: FT(m[1]) };
+  m = t.match(/ref(?:erence)?\s*(?:no\.?|number)?\s*[:.]?\s*(FT[A-Z0-9]{8,22})/i) || t.match(/[?&]id=(FT[A-Z0-9]{8,22})/i); // CBE
+  if (m) return { bank: 'cbe', amount_c, txid: FT(m[1]) };
+  const dt = t.match(/(\d{2})\/(\d{2})\/(\d{4})\s+at\s+(\d{1,2}):(\d{2}):(\d{2})\s*([AP])M/i); // Dashen
+  if (!dt) return null;
+  const bal = t.match(/balance\s+is\s+ETB\s*([\d,]+(?:\.\d+)?)/i);
+  return { bank: 'dashen', amount_c, txid: ('DSH' + dt[1] + dt[2] + dt[3] + dt[4].padStart(2, '0') + dt[5] + dt[6] + dt[7] + (bal ? C(toNum(bal[1])) : 0)).toUpperCase() };
 }
-// finds the transaction number in a payment message the player pastes (Telebirr / CBE / BOA / Dashen)
+export const parseSms = parseBank; // the SMS-forwarder route uses the same reader
+// reads the payment message a player pastes in the bot: a known bank SMS gives bank + amount + transaction number; anything else just looks for a transaction number
 export function parsePaste(t) {
   t = String(t || '');
-  const lab = t.match(/(?:transaction\s*(?:number|id|no\.?)|ref(?:erence)?(?:\s*(?:no\.?|number|id))?|receipt\s*(?:no\.?|number)|ቁጥርዎ|ቁጥር)\s*(?:is|:|-)?\s*([A-Z0-9]{8,14})\b/i);
+  const b = parseBank(t); if (b) return b;
+  const lab = t.match(/(?:transaction\s*(?:number|id|no\.?)|ref(?:erence)?(?:\s*(?:no\.?|number|id))?|receipt\s*(?:no\.?|number)|ቁጥርዎ|ቁጥር)\s*(?:is|:|-)?\s*([A-Z0-9]{8,20})\b/i);
   if (lab && /\d/.test(lab[1]) && /[A-Z]/i.test(lab[1])) return { txid: lab[1].toUpperCase() };
-  const all = (t.toUpperCase().match(/\b[A-Z0-9]{8,14}\b/g) || []).filter(x => /\d/.test(x) && /[A-Z]/.test(x));
+  const all = (t.toUpperCase().match(/\b[A-Z0-9]{8,20}\b/g) || []).filter(x => /\d/.test(x) && /[A-Z]/.test(x));
   return all.length ? { txid: all[0] } : null;
 }
 export function normPhone(p) { p = String(p || '').replace(/[\s-]/g, ''); if (/^\+?251[79]\d{8}$/.test(p)) p = '0' + p.replace(/^\+?251/, ''); return /^0[79]\d{8}$/.test(p) ? p : null }
@@ -151,11 +180,11 @@ async function decideWithdraw(env, id, paid) {
   if (done) { const w = await db.prepare('SELECT user_id,amount_c FROM withdrawals WHERE id=?').bind(id).first(); say(env, w.user_id, paid ? `✅ ${B(w.amount_c)} ብር ተልኮልዎታል።` : `↩️ የማውጣት ጥያቄዎ ውድቅ ተደርጓል — ${B(w.amount_c)} ብር ወደ ቀሪ ሂሳብዎ ተመልሷል።`) }
   return done;
 }
-// a deposit request (from the app or from the bot): auto-credited when a matching Telebirr SMS exists, otherwise sent to the admins
+// a deposit request (from the app or from the bot): auto-credited when a matching bank SMS (same transaction number and amount) was already forwarded to /sms, otherwise sent to the admins and credited the moment the SMS arrives
 async function makeDeposit(env, u, amt, txid, method) {
   const db = env.DB, now = Date.now(); let id;
   try { id = (await db.prepare('INSERT INTO deposits(user_id,txid,amount_c,method,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, txid, C(amt), method, 'pending', now).run()).meta.last_row_id } catch (e) { return { error: 'txid_used' } }
-  const ok = method === 'telebirr' && await tryMatch(env, txid);
+  const ok = await tryMatch(env, txid);
   if (!ok) await notifyAdmins(env, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid }), [[{ text: '✅ Approve', callback_data: 'da:' + id }, { text: '❌ Reject', callback_data: 'dr:' + id }]]);
   return { status: ok ? 'approved' : 'pending', id };
 }
@@ -377,7 +406,7 @@ async function onPlayerCb(env, q, parts) { // menu / bank / cancel buttons
     if (flow === 'd') {
       if (!st || st.step !== 'dep_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «Deposit» ን እንደገና ይጫኑ።');
       await setState(env, uid, 'dep_paste', { amt: st.amt, method: bank });
-      return sendTo(env, uid, `የሚያጋጥማቹ የክፍያ ችግር:\n${SUPPORT} ላይ ፃፉልን።\n\n1. ከታች ባለው አካውንት ${st.amt} ብር ያስገቡ\n${acctText(env, bank)}\n\n2. የከፈሉበትን አጭር የጽሁፍ መልዕክት(message) copy በማድረግ እዚ ላይ Paste አድርገው ያስገቡና ይላኩት 👇👇👇`);
+      return sendTo(env, uid, `የሚያጋጥማቹ የክፍያ ችግር:\n${SUPPORT} ላይ ፃፉልን።\n\n1. ከታች ባለው አካውንት ${st.amt} ብር ያስገቡ\n${acctText(env, bank)}\n\n2. የከፈሉበትን አጭር የጽሁፍ መልዕክት(message) copy በማድረግ እዚ ላይ Paste አድርገው ያስገቡና ይላኩት 👇👇👇\n\n⚠️ መልዕክቱን ሙሉ በሙሉ ያለምንም ለውጥ ይላኩ (የግብይት ቁጥሩን ጨምሮ)።`);
     }
     if (flow === 'w') {
       if (!st || st.step !== 'wd_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «Withdraw» ን እንደገና ይጫኑ።');
@@ -397,10 +426,12 @@ async function onStep(env, u, st, text) { // the player typed something while in
   if (st.step === 'dep_paste') {
     const pr = parsePaste(t);
     if (!pr) return sendTo(env, uid, '⚠️ የግብይት ቁጥር አልተገኘም። የከፈሉበትን ሙሉ መልዕክት እንደገና copy አድርገው Paste ያድርጉ።');
-    const r = await makeDeposit(env, u, st.amt, pr.txid, st.method);
+    const amt = pr.amount_c ? B(pr.amount_c) : st.amt; // the amount written in the bank SMS is the real money, so it wins over the typed amount
+    if (amt < MIN_DEP) return sendTo(env, uid, `⚠️ ማስገባት የሚችሉት ከ ${MIN_DEP} ብር ጀምሮ ነው። በመልዕክቱ ላይ ያለው መጠን ${amt} ብር ነው።`);
+    const r = await makeDeposit(env, u, amt, pr.txid, pr.bank || st.method);
     if (r.error) return sendTo(env, uid, '⚠️ ይህ የግብይት ቁጥር ከዚህ በፊት ተመዝግቧል። ሌላ መልዕክት ያስገቡ።');
     await clearState(env, uid);
-    return r.status === 'approved' ? null : sendMenu(env, uid, '⏳ ጥያቄዎ ደርሶናል። አስተዳዳሪው ካረጋገጠ በኋላ ገንዘቡ ወደ ሂሳብዎ ይጨመራል።');
+    return r.status === 'approved' ? null : sendMenu(env, uid, `⏳ የ${amt} ብር ጥያቄዎ ደርሶናል። መልዕክቱ ሲረጋገጥ ገንዘቡ በራስ-ሰር ወደ ሂሳብዎ ይጨመራል (አስተዳዳሪውም ያረጋግጣል)።`);
   }
   if (st.step === 'wd_amount') {
     if (!isAmt || num < MIN_WD) return sendTo(env, uid, `⚠️ ማውጣት የሚችሉት ከ ${MIN_WD} ብር ጀምሮ ነው። ቁጥር ብቻ ያስገቡ።`);
@@ -504,7 +535,7 @@ async function onTelegram(env, up) {
   if (cmd === '/instruction') return menuAction(env, u, 'ins');
   return sendMenu(env, uid, '🎮 እንኳን ደህና መጡ! ከታች ካሉት አማራጮች ይምረጡ።');
 }
-const depositText = x => `💰 Deposit #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr via ${x.method}\nTransaction: ${x.txid}\nNo matching SMS yet — approve only if the money arrived.`;
+const depositText = x => `💰 Deposit #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr via ${x.method}\nTransaction: ${x.txid}\nNo matching SMS yet — it is credited automatically when the SMS arrives; approve by hand only if the money really arrived.`;
 const notifyAdmins = async (env, text, kb) => Promise.all((await admins(env)).map(a => say(env, a, text, kb)));
 const withdrawText = x => `💸 Withdrawal #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr\nSend to: ${x.method} ${x.account}`;
 
@@ -604,12 +635,12 @@ const errOf = e => /CHECK/.test(e.message) ? 'insufficient_balance' : /UNIQUE|PR
 async function route(req, env, url) {
   const p = url.pathname, db = env.DB, now = Date.now();
   if (p === '/') return J({ ok: true });
-  if (p === '/sms' && req.method === 'POST') { // phone forwards incoming Telebirr SMS here
+  if (p === '/sms' && req.method === 'POST') { // the phone(s) that receive the money forward every incoming bank SMS here (Telebirr, Dashen, BOA, CBE)
     if (req.headers.get('x-secret') !== env.SMS_SECRET) return J({ error: 'forbidden' }, 403);
     const raw = await req.text(); let text = raw; try { const o = JSON.parse(raw); text = o.text || o.message || o.body || o.content || raw } catch (e) { }
     const s = parseSms(text); if (!s) return J({ ok: true, parsed: false });
     await db.prepare('INSERT OR IGNORE INTO sms_log(txid,amount_c,raw,ts) VALUES(?,?,?,?)').bind(s.txid, s.amount_c, String(text).slice(0, 500), now).run();
-    await tryMatch(env, s.txid); return J({ ok: true, parsed: true });
+    await tryMatch(env, s.txid); return J({ ok: true, parsed: true, bank: s.bank });
   }
   if (p === '/tg/' + env.TG_SECRET && req.method === 'POST') { await onTelegram(env, await req.json()); return J({ ok: true }) }
   if (!p.startsWith('/api/')) return J({ error: 'not_found' }, 404);
@@ -666,7 +697,7 @@ async function route(req, env, url) {
   }
   if (p === '/api/deposit') {
     const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = ['telebirr', 'cbe', 'boa', 'dashen'].includes(b.method) ? b.method : 'telebirr';
-    if (!(amt >= MIN_DEP) || txid.length < 8 || txid.length > 14) return J({ error: 'bad_input', min: MIN_DEP }, 400);
+    if (!(amt >= MIN_DEP) || txid.length < 8 || txid.length > 24) return J({ error: 'bad_input', min: MIN_DEP }, 400);
     const r = await makeDeposit(env, u, amt, txid, method); if (r.error) return J({ error: r.error }, 409);
     return J({ status: r.status, balance: B((await db.prepare('SELECT balance FROM users WHERE id=?').bind(u.id).first()).balance) });
   }
