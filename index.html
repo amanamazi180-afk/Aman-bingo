@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>አማን BINGO</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@800;900&display=swap" media="print" onload="this.media='all'">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{--bg:#0a1224;--cd:#111c36;--ln:#26365e;--or:#f5b73b;--gr:#22c55e;--rd:#ef4444;--tx:#e8eefc;--mu:#93a3c7;--dk:#04150c;--tk:#dc2626;--cl:#dc2626}
@@ -116,7 +116,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 <div class="ov" id="win"><div style="font-size:54px">👑</div><h1 id="wt" style="font-size:36px;color:var(--or)"></h1><p id="wn" style="margin:8px 0 14px;font-size:18px"></p><div id="wc" style="width:100%;max-width:340px"></div><p class="hint" id="ws" style="margin-top:14px"></p></div>
 
 <script>
-const API="https://aman-bingo.amanamazi180.workers.dev";
+const API=location.hostname.endsWith("github.io")?"https://aman-bingo.amanamazi180.workers.dev":"";
 const tg=window.Telegram&&Telegram.WebApp;if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#0a1224");tg.setBackgroundColor("#0a1224")}catch(e){}}
 const $=i=>document.getElementById(i),CL=["#3b82f6","#06b6d4","#22c55e","#f5b73b","#ef4444"];
 const L=n=>"BINGO"[Math.floor((n-1)/15)],F=n=>String(+Number(n).toFixed(2));
@@ -169,14 +169,20 @@ function fail(e){
   const h=$("hreg");
   if(e==="unauthorized"){
     h.innerHTML=(initData()?"⚠️ The server could not verify your Telegram login. Check that the BOT_TOKEN secret in Cloudflare is the token of @Amanbingo2bot.":"⚠️ Close this window and open the game with the bot's Play button.")+`<br><button class="gb" style="margin-top:10px" onclick="tg?tg.close():location.href='https://t.me/Amanbingo2bot'">Close</button>`
-  }else h.textContent=ERR[e]||"Could not connect. Check your internet and reopen."
+  }else h.innerHTML=(ERR[e]||"Could not connect. Check your internet and try again.")+`<br><button class="gb" style="margin-top:10px" onclick="boot()">⟳ Try again</button>`
 }
 async function boot(){
   if(API.indexOf("PASTE_")===0){$("hreg").textContent="Setup needed: put your Worker URL in index.html (API line).";return}
-  for(let a=0;a<2;a++){
+  for(let a=0;a<5;a++){
     try{const [me,st]=await Promise.all([api("/api/me"),api("/api/state")]);reg=me.registered;S=st;off=st.now-Date.now();ready=true;goHome(me);return}
-    catch(e){if(e==="unauthorized"&&a===0){await new Promise(r=>setTimeout(r,900));continue}fail(e);return}
+    catch(e){
+      if(e==="unauthorized"&&a===0){await new Promise(r=>setTimeout(r,900));continue}
+      if(typeof e==="string"&&e!=="server_error"){fail(e);return}
+      $("hreg").textContent="Reconnecting… ("+(a+1)+"/5)";
+      await new Promise(r=>setTimeout(r,1500*(a+1)));
+    }
   }
+  fail("net");
 }
 async function goHome(me){
   inGame=false;show("home");setNav(0);
