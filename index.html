@@ -57,6 +57,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .spk{background:none;border:0;font-size:22px;color:var(--tx)}
 .bigbox{display:flex;align-items:center;justify-content:center;padding:8px}
 .bigb{min-width:88px;height:88px;border-radius:50%;background:#f4f7ff;color:#0a1a3a;border:6px solid var(--or);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;padding:0 8px;white-space:nowrap}
+@keyframes blink{0%,100%{opacity:1;transform:scale(1.12);box-shadow:0 0 24px 8px var(--or)}50%{opacity:.35;transform:scale(.94);box-shadow:none}}
+.bigb.new{animation:blink .5s ease-in-out 6}
 .auto{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;font-weight:800;letter-spacing:.08em;font-size:12px}
 .sw{width:46px;height:26px;border-radius:13px;background:var(--gr);position:relative}.sw:after{content:"";position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff}
 .sw.off{background:#3a4a6e}.sw.off:after{right:auto;left:3px}
@@ -246,7 +248,7 @@ function drawGame(){
   const gk=r.id+"|"+cl.length+"|"+S.mine.join(",");
   if(gk!==gkey){gkey=gk; /* the board and cards are rebuilt only when a number is called or the cartelas change */
     for(let i=1;i<=75;i++)$("b"+i).className="nn"+(i===n?" l":cl.includes(i)?" k":"");
-    $("big").textContent=n?L(n)+"-"+n:"—";
+    $("big").textContent=n?L(n)+"-"+n:"—";const bk=r.id+"|"+cl.length;if(n&&bk!==window._bk){window._bk=bk;const bg=$("big");bg.classList.remove("new");void bg.offsetWidth;bg.classList.add("new")}
     $("rec").innerHTML=cl.slice(-3).reverse().map(x=>`<span style="background:${CL[Math.floor((x-1)/15)]}">${L(x)}-${x}</span>`).join("");
     $("mycards").innerHTML=S.mine.length?S.mine.map(c=>`<div class="mc"><div class="cn">CARTELA #${c}</div>${cardHTML(c,cl,null,n)}</div>`).join(""):'<div style="text-align:center;padding:26px 6px"><b style="font-size:20px">WATCHING<br>ONLY</b><p class="hint" style="margin-top:10px">The next round starts soon. Wait here.</p></div>'}
   const ab=$("act");$("sw").className="sw"+(S.auto?"":" off");
