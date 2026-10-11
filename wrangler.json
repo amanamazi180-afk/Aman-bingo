@@ -21,11 +21,11 @@
     { "tag": "v1", "new_sqlite_classes": ["GameHub"] }
   ],
   "vars": {
-    "GAME_URL": "https://play.example.com/",
-    "ADMIN_URL": "https://play.example.com/admin.html",
+    "GAME_URL": "https://aman-bingo.amanamazi180.workers.dev/",
+    "ADMIN_URL": "https://aman-bingo.amanamazi180.workers.dev/admin.html",
     "STAKE": "10",
     "DAILY_BONUS": "0",
-    "PROMO_PHOTO": "https://play.example.com/Promo%20pic.png",
+    "PROMO_PHOTO": "https://aman-bingo.amanamazi180.workers.dev/Promo%20pic.png",
     "CBE_ACCOUNT": "0958828304 AMANUEL"
   }
 }
