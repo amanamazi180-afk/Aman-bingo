@@ -6,6 +6,9 @@
 // Deposit verification: the player pastes the bank SMS in the bot. The Worker reads the amount + transaction number (Telebirr, Dashen, BOA, CBE)
 // and credits the balance automatically when the SAME SMS was forwarded to POST /sms by the SMS-forwarder app on the receiving phone.
 // If that SMS has not arrived yet, the deposit waits (and is also sent to the admins) and is credited the moment the SMS arrives.
+// SECRET BONUS: the admin chooses cartela numbers for one round (Admin > Bonus). The player who takes one of them wins the bonus at once and is announced to everybody.
+// In a bonus round every taken cartela is locked (nobody can drop or change it), and the secret cartela numbers are never sent to the phones.
+// WEEKLY TOP PLAYERS: players are ranked by games played in the week (Monday 00:00 - Sunday 24:00 Ethiopia time). The admin sets the prizes (Admin > Weekly) and pays last week's winners with one button.
 import { DurableObject } from 'cloudflare:workers';
 const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 400, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
@@ -14,6 +17,7 @@ const bonusC = env => C(env.DAILY_BONUS ?? 0), // daily bonus is off unless DAIL
    bonusPeriod = now => Math.floor((now - 5 * 36e5) / 864e5); // new period starts 08:00 Ethiopia time (05:00 UTC)
 const refreshBonusStmt = (env, id, now) => env.DB.prepare('UPDATE users SET bonus_c=?1,bonus_period=?2 WHERE id=?3 AND (bonus_period<?2 OR (?1=0 AND bonus_c<>0))').bind(bonusC(env), bonusPeriod(now), id); // resets to the daily amount (0 = off), never added on top
 const refreshBonus = (env, id, now) => refreshBonusStmt(env, id, now).run();
+const weekStart = (t = Date.now()) => { const d = Math.floor((t + 3 * 36e5) / 864e5); return (d - (d + 3) % 7) * 864e5 - 3 * 36e5 }; // Monday 00:00 Ethiopia time of the week containing t
 const rnd32 = () => crypto.getRandomValues(new Uint32Array(1))[0];
 const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { 'content-type': 'application/json' } });
 
@@ -215,7 +219,12 @@ const ensureTables = async env => { if (tablesReady) return; await env.DB.batch(
   env.DB.prepare('CREATE TABLE IF NOT EXISTS bans(id INTEGER PRIMARY KEY)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT,ts INTEGER,actor TEXT,action TEXT,detail TEXT)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS bot_state(uid INTEGER PRIMARY KEY,step TEXT,data TEXT,ts INTEGER)'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS referrals(user_id INTEGER PRIMARY KEY,ref_id INTEGER,ts INTEGER)')]);
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS referrals(user_id INTEGER PRIMARY KEY,ref_id INTEGER,ts INTEGER)'),
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS bonus_wins(round_id INTEGER,cartela INTEGER,user_id INTEGER,name TEXT,amount_c INTEGER,paid INTEGER DEFAULT 0,ts INTEGER,PRIMARY KEY(round_id,cartela))'),
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_games(week INTEGER,user_id INTEGER,games INTEGER DEFAULT 0,PRIMARY KEY(week,user_id))'), // games played per player per week (Monday 00:00 Ethiopia time)
+  env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_wk_games ON wk_games(week,games DESC)'),
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_paid(week INTEGER PRIMARY KEY,ts INTEGER)'), // weeks whose prizes were already paid (a week can be paid only once)
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_winners(week INTEGER,pos INTEGER,user_id INTEGER,name TEXT,prize_c INTEGER,games INTEGER,PRIMARY KEY(week,pos))')]);
   try { await env.DB.prepare('SELECT auto_off FROM users LIMIT 1').first() } catch (e) { try { await env.DB.prepare('ALTER TABLE users ADD COLUMN auto_off INTEGER DEFAULT 0').run() } catch (e2) { } }
   tablesReady = true };
 const cfg = { t: 0, set: {}, bans: new Set() }; // settings and bans are cached for 5 seconds to keep requests fast
@@ -223,6 +232,26 @@ const loadCfg = async env => { if (Date.now() - cfg.t < 5000) return cfg; await 
 const getSet = async (env, k) => (await loadCfg(env)).set[k] ?? null;
 const setSet = async (env, k, v) => { await ensureTables(env); await env.DB.prepare('INSERT INTO settings(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v').bind(k, v).run(); cfg.t = 0 };
 const isBanned = async (env, id) => (await loadCfg(env)).bans.has(String(id));
+
+/* ---------- secret bonus (admin chooses cartelas for one round; the taker wins at once) ----------
+   Stored in settings as {"on":true,"round":12,"items":[{"c":7,"a":5000}]} (a = cents). Read straight from the database (never cached)
+   so a pick can never miss a bonus the admin has just saved. The cartela numbers are never sent to the players. */
+const readBonus = async env => { await ensureTables(env); const r = await env.DB.prepare("SELECT v FROM settings WHERE k='bonus'").first(); try { const c = r && JSON.parse(r.v); return c && c.on && Array.isArray(c.items) && c.items.length ? c : null } catch (e) { return null } };
+const bonusFor = async (env, roundId) => { const c = await readBonus(env); return c && c.round === roundId ? c : null };
+// pays the bonus to the player who just took the cartela. One batch: the win row is created once, the balance is added only while paid=0, then paid=1 — so it can never pay twice.
+async function awardBonus(env, roundId, no, u, amount_c) {
+  const db = env.DB;
+  for (let t = 0; t < 2; t++) {
+    try {
+      const r = await db.batch([
+        db.prepare('INSERT OR IGNORE INTO bonus_wins(round_id,cartela,user_id,name,amount_c,paid,ts) SELECT ?1,?2,?3,?4,?5,0,?6 WHERE EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)').bind(roundId, no, u.id, u.name, amount_c, Date.now()),
+        db.prepare('UPDATE users SET balance=balance+?4 WHERE id=?3 AND EXISTS(SELECT 1 FROM bonus_wins WHERE round_id=?1 AND cartela=?2 AND user_id=?3 AND paid=0)').bind(roundId, no, u.id, amount_c),
+        db.prepare('UPDATE bonus_wins SET paid=1 WHERE round_id=?1 AND cartela=?2 AND user_id=?3 AND paid=0').bind(roundId, no, u.id)]);
+      return r[2].meta.changes > 0 ? { cartela: no, name: u.name, amount: B(amount_c) } : null;
+    } catch (e) { }
+  }
+  return null;
+}
 
 /* ---------- shared game rounds (advanced only inside the GameHub Durable Object) ---------- */
 const latest = db => db.prepare('SELECT * FROM rounds ORDER BY id DESC LIMIT 1').first();
@@ -255,8 +284,11 @@ async function refreshManual(env, r, rc, now) { // players with Automatic switch
   rc.manual = new Set((await env.DB.prepare('SELECT DISTINCT p.user_id FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=? AND u.auto_off=1').bind(r.id).all()).results.map(x => x.user_id));
 }
 async function settle(env, r, picks, w, now) { // pays the winners and ends the round; returns false if another request already did
+  await ensureTables(env);
   const db = env.DB, prize = Math.floor(picks.length * r.stake_c * CUT), share = Math.floor(prize / w.picks.length);
   const res = await db.batch([...w.picks.map(p => db.prepare("UPDATE users SET balance=balance+?3 WHERE id=?2 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running')").bind(r.id, p.user_id, share)),
+    // weekly ranking: every player of this round gets +1 game (only while the round is still 'running', so it can never count twice)
+    db.prepare("INSERT INTO wk_games(week,user_id,games) SELECT ?2,user_id,1 FROM(SELECT DISTINCT user_id FROM picks WHERE round_id=?1) WHERE EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running') ON CONFLICT(week,user_id) DO UPDATE SET games=games+1").bind(r.id, weekStart(now)),
     db.prepare("UPDATE rounds SET status='ended',ended_ts=?2,called_n=?3,winners=?4 WHERE id=?1 AND status='running'").bind(r.id, now, w.k, JSON.stringify(w.picks.map(p => p.cartela)))]);
   return res[res.length - 1].meta.changes > 0;
 }
@@ -294,6 +326,7 @@ export class GameHub extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.round = null; this.picks = []; this.pickRound = 0; this.pv = 0; this.pt = 0; this.nextAt = 0; this.busy = null; this.sh = null;
+    this.bn = null; this.bv = 0; // bonus info for the open lobby: { round, locked, wins:[{cartela,name,amount}] }  (the secret cartelas are NOT kept here)
   }
   async sync() { // returns the current round; asks the database only when the next event is due
     const now = Date.now();
@@ -320,29 +353,44 @@ export class GameHub extends DurableObject {
     const rows = (await this.env.DB.prepare('SELECT p.cartela,p.user_id,u.name FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=?').bind(r.id).all()).results;
     if (this.pickRound !== r.id || v === this.pv) { this.picks = rows; this.pickRound = r.id; this.pv++ } // a pick that arrived while reading wins over the older read
     this.pt = Date.now();
+    await this.loadBonus(r);
+  }
+  async loadBonus(r) { // is this round a bonus round (locked picks) and who has already won
+    try {
+      const cf = await bonusFor(this.env, r.id);
+      const wins = (await this.env.DB.prepare('SELECT cartela,name,amount_c FROM bonus_wins WHERE round_id=? ORDER BY ts').bind(r.id).all()).results;
+      this.bn = { round: r.id, locked: !!cf, wins: wins.map(w => ({ cartela: w.cartela, name: w.name, amount: B(w.amount_c) })) }; this.bv++;
+    } catch (e) { }
   }
   async current() { return this.sync() } // the current round row, kept fresh
   async state(me) { // same JSON the old stateFor produced; me = { id, auto_off, balance, bonus_c } read fresh by the caller
     const r = await this.sync(), now = Date.now();
     const n = r.status === 'running' ? callsAt(r, now) : r.status === 'ended' ? r.called_n : 0;
-    const key = r.id + '|' + r.status + '|' + this.pv + '|' + n;
+    const key = r.id + '|' + r.status + '|' + this.pv + '|' + n + '|' + this.bv;
     let sh = this.sh;
     if (!sh || sh.key !== key) {
       const picks = this.picks, by = new Map();
       for (const p of picks) { let a = by.get(p.user_id); if (!a) by.set(p.user_id, a = []); a.push(p.cartela) }
       const win = r.status === 'ended' ? JSON.parse(r.winners || '[]') : [];
       const called = n ? (await roundCache(this.env, r)).order.slice(0, n) : [];
+      const bn = r.status === 'lobby' && this.bn && this.bn.round === r.id ? this.bn : null; // the bonus winner stays on screen only until the game starts
       sh = this.sh = { key, by, called, taken: picks.map(p => p.cartela), players: by.size, cards: picks.length,
+        bround: bn ? { locked: bn.locked, wins: bn.wins.slice() } : { locked: false, wins: [] },
         derash: B(Math.floor(picks.length * r.stake_c * CUT)), winners: picks.filter(p => win.includes(p.cartela)).map(p => ({ cartela: p.cartela, name: p.name })) };
     }
     return { now, round: { id: r.id, status: r.status, start_ts: r.start_ts, lobby_ms: LOBBY_MS, call_ms: CALL_MS, stake: B(r.stake_c), rest_ms: REST_MS, ended_ts: r.ended_ts },
       taken: sh.taken, mine: sh.by.get(me.id) || [], called: sh.called, players: sh.players, cards: sh.cards,
-      auto: !me.auto_off, derash: sh.derash, winners: sh.winners, balance: B(me.balance), bonus: B(me.bonus_c) };
+      auto: !me.auto_off, derash: sh.derash, winners: sh.winners, bround: sh.bround, balance: B(me.balance), bonus: B(me.bonus_c) };
   }
-  async picked(op, roundId, no, uid, name, me) { // the database already accepted this pick / unpick: update memory and answer
+  async picked(op, roundId, no, uid, name, me, win) { // the database already accepted this pick / unpick: update memory and answer
     if (this.round && this.round.id === roundId && this.round.status === 'lobby' && this.pickRound === roundId) {
       if (op === 'pick') { if (!this.picks.some(p => p.cartela === no)) this.picks.push({ cartela: no, user_id: uid, name }) }
       else this.picks = this.picks.filter(p => !(p.cartela === no && p.user_id === uid));
+      if (win) { // this pick hit a bonus cartela: announce it to everybody right now
+        if (!this.bn || this.bn.round !== roundId) this.bn = { round: roundId, locked: true, wins: [] };
+        if (!this.bn.wins.some(w => w.cartela === win.cartela)) this.bn.wins.push(win);
+        this.bv++;
+      }
       this.pv++;
     }
     return this.state(me);
@@ -360,20 +408,46 @@ export class GameHub extends DurableObject {
     return { state: await this.state({ id: me.id, auto_off: f.auto_off, balance: f.balance, bonus_c: f.bonus_c }) };
   }
   async manualChanged() { if (rcache) rcache.mt = 0; this.nextAt = 0 } // a player switched Automatic on/off
-  async invalidate() { this.nextAt = 0; cfg.t = 0 } // admin changed something: re-read on the next request
+  async invalidate() { this.nextAt = 0; this.pt = 0; cfg.t = 0 } // admin changed something: re-read (including the bonus) on the next request
 }
 const hubOf = env => env.HUB.get(env.HUB.idFromName('main'));
 const noHub = () => J({ error: 'server_error', detail: 'HUB binding is missing in wrangler.json' }, 500);
 const poke = env => env.HUB ? hubOf(env).invalidate().catch(() => { }) : null;
 
 const startOfDay = () => Math.floor((Date.now() + 3 * 36e5) / 864e5) * 864e5 - 3 * 36e5; // Ethiopia time (UTC+3)
+
+/* ---------- weekly top players (ranked by games played; a week runs Monday 00:00 to Sunday 24:00 Ethiopia time) ----------
+   Games are counted in wk_games when a round ends. Prizes are set by the admin (Admin > Weekly) and paid by the admin with one button after the week is over. */
+const maskPhone = p => p ? String(p).slice(0, 3) + '****' + String(p).slice(-2) : '';
+const prizesOf = async env => { try { const a = JSON.parse(await getSet(env, 'wk_prizes') || '[]'); return Array.isArray(a) ? a.slice(0, 10).map(x => Math.max(0, Number(x) || 0)) : [] } catch (e) { return [] } };
+const wkTop = (env, wk, n) => env.DB.prepare('SELECT g.user_id id,u.name n,u.phone ph,g.games g FROM wk_games g JOIN users u ON u.id=g.user_id WHERE g.week=?1 ORDER BY g.games DESC,g.user_id LIMIT ?2').bind(wk, n).all().then(r => r.results);
+const wkRows = (top, pr) => top.map((x, i) => ({ rank: i + 1, name: x.n, phone: maskPhone(x.ph), games: x.g, prize: pr[i] || 0 }));
+let wkCache = { w: 0, t: 0, top: [] }; // the top 10 is cached for 15 seconds so opening the Scores tab is cheap
+async function weeklyBoard(env, u) {
+  await ensureTables(env);
+  const db = env.DB, now = Date.now(), wk = weekStart(now), pr = await prizesOf(env);
+  if (wkCache.w !== wk || now - wkCache.t > 15000) wkCache = { w: wk, t: now, top: await wkTop(env, wk, 10) };
+  const mine = await db.prepare('SELECT games g FROM wk_games WHERE week=?1 AND user_id=?2').bind(wk, u.id).first(), mg = mine ? mine.g : 0;
+  const higher = mg ? (await db.prepare('SELECT COUNT(*) c FROM wk_games WHERE week=?1 AND (games>?2 OR (games=?2 AND user_id<?3))').bind(wk, mg, u.id).first()).c : 0;
+  const rank = mg ? higher + 1 : null;
+  const lp = await db.prepare('SELECT week,ts FROM wk_paid ORDER BY week DESC LIMIT 1').first();
+  let last = null, won = null;
+  if (lp) {
+    const w = (await db.prepare('SELECT pos,name,prize_c,games FROM wk_winners WHERE week=? ORDER BY pos').bind(lp.week).all()).results;
+    last = { winners: w.map(x => ({ rank: x.pos, name: x.name, prize: B(x.prize_c), games: x.games })) };
+    const mw = await db.prepare('SELECT pos,prize_c,games FROM wk_winners WHERE week=? AND user_id=?').bind(lp.week, u.id).first();
+    if (mw && lp.ts > now - 7 * 864e5) won = { rank: mw.pos, prize: B(mw.prize_c), games: mw.games }; // shown as a congratulations card for 7 days
+  }
+  return { period: 'weekly', top: wkRows(wkCache.top, pr), me: { rank, played: mg, prize: rank && rank <= 10 ? pr[rank - 1] || 0 : 0 }, ends_ts: wk + 7 * 864e5, now, prizes_on: pr.some(x => x > 0), last, won };
+}
 async function leaderboard(env, u, period) {
-  const db = env.DB, since = period === 'weekly' ? Date.now() - 7 * 864e5 : startOfDay();
+  if (period === 'weekly') return weeklyBoard(env, u);
+  const db = env.DB, since = startOfDay();
   const base = "FROM picks p JOIN rounds r ON r.id=p.round_id WHERE r.status='ended' AND r.ended_ts>=?1";
   const top = (await db.prepare(`SELECT u.name n,COUNT(DISTINCT p.round_id) g ${base.replace('WHERE', 'JOIN users u ON u.id=p.user_id WHERE')} GROUP BY u.id ORDER BY g DESC LIMIT 10`).bind(since).all()).results;
   const mine = (await db.prepare(`SELECT COUNT(DISTINCT p.round_id) g ${base} AND p.user_id=?2`).bind(since, u.id).first()).g || 0;
   const higher = (await db.prepare(`SELECT COUNT(*) c FROM(SELECT p.user_id,COUNT(DISTINCT p.round_id) g ${base} GROUP BY p.user_id HAVING g>?2)`).bind(since, mine).first()).c;
-  return { top: top.map(t => [t.n, t.g]), me: { rank: mine ? higher + 1 : null, played: mine } };
+  return { period: 'daily', top: top.map(t => [t.n, t.g]), me: { rank: mine ? higher + 1 : null, played: mine } };
 }
 
 /* ---------- Telegram bot: menu buttons, deposit / withdraw / transfer flows, admin commands ---------- */
@@ -620,6 +694,67 @@ async function adminRoute(req, env, url) {
     const r = (await db.prepare('SELECT ts,actor,action,detail FROM admin_log ORDER BY id DESC LIMIT 30').all()).results;
     return J({ items: r });
   }
+  if (name === 'weekly') { // this week (live) and last week (can be paid once)
+    const wk = weekStart(), lw = wk - 7 * 864e5, pr = await prizesOf(env);
+    const paid = !!(await db.prepare('SELECT 1 x FROM wk_paid WHERE week=?').bind(lw).first());
+    return J({ prizes: pr, ends_ts: wk + 7 * 864e5, now: Date.now(),
+      this_week: wkRows(await wkTop(env, wk, 10), pr), last_week: wkRows(await wkTop(env, lw, 10), pr), last_paid: paid });
+  }
+  if (name === 'set-prizes') { // "3000, 2000, 1000, 500, 500 ..." = prize for rank 1, 2, 3 ... (up to 10). Empty = no prizes.
+    const parts = String(b.prizes ?? '').split(/[\s,;]+/).filter(Boolean), pr = [];
+    for (const x of parts) { const v = Number(x); if (!isFinite(v) || v < 0 || v > 1000000) return J({ error: 'bad_input' }, 400); pr.push(v) }
+    if (pr.length > 10) return J({ error: 'bad_input' }, 400);
+    await setSet(env, 'wk_prizes', JSON.stringify(pr)); await log('set weekly prizes', pr.join(', ') || 'none');
+    return J({ ok: true, prizes: pr });
+  }
+  if (name === 'pay-weekly') { // pays LAST week's top players (a week can only be paid once) and sends each one a congratulations message
+    const lw = weekStart() - 7 * 864e5, pr = await prizesOf(env);
+    if (!pr.some(x => x > 0)) return J({ error: 'no_prizes' }, 400);
+    const win = (await wkTop(env, lw, pr.length)).map((x, i) => ({ pos: i + 1, id: x.id, name: x.n, games: x.g, prize_c: C(pr[i] || 0) })).filter(x => x.prize_c > 0);
+    if (!win.length) return J({ error: 'no_winners' }, 409);
+    try {
+      await db.batch([db.prepare('INSERT INTO wk_paid(week,ts) VALUES(?,?)').bind(lw, Date.now()), // fails if this week was already paid, so nothing below is applied
+        ...win.map(x => db.prepare('INSERT INTO wk_winners(week,pos,user_id,name,prize_c,games) VALUES(?,?,?,?,?,?)').bind(lw, x.pos, x.id, x.name, x.prize_c, x.games)),
+        ...win.map(x => db.prepare('UPDATE users SET balance=balance+? WHERE id=?').bind(x.prize_c, x.id))]);
+    } catch (e) { return J({ error: 'already_paid' }, 409) }
+    await log('pay weekly prizes', win.length + ' players, ' + B(win.reduce((a, x) => a + x.prize_c, 0)) + ' birr');
+    await Promise.all(win.map(x => say(env, x.id, `🏆 እንኳን ደስ አለዎት! የሳምንቱ ከፍተኛ ተጫዋች ራንክ አሸናፊ ሆነዋል!\nደረጃ #${x.pos} · ጨዋታ ${x.games} · ሽልማት ${B(x.prize_c)} ብር ወደ ቀሪ ሂሳብዎ ተጨምሯል።`, playKb(env))));
+    return J({ ok: true, paid: win.length, total: B(win.reduce((a, x) => a + x.prize_c, 0)) });
+  }
+  if (name === 'bonus') { // what the admin has set (the only place the secret cartela numbers are ever shown)
+    if (!env.HUB) return noHub();
+    const cr = await hubOf(env).current(), raw = await db.prepare("SELECT v FROM settings WHERE k='bonus'").first(); let cf = null; try { cf = raw && JSON.parse(raw.v) } catch (e) { }
+    const on = !!(cf && cf.on && Array.isArray(cf.items) && cf.items.length);
+    const wins = on ? (await db.prepare('SELECT cartela,name FROM bonus_wins WHERE round_id=?').bind(cf.round).all()).results : [];
+    return J({ on, round: on ? cf.round : null, current: cr.id, status: cr.status,
+      items: on ? cf.items.map(i => ({ c: i.c, amount: B(i.a), won: (wins.find(w => w.cartela === i.c) || {}).name || null })) : [] });
+  }
+  if (name === 'set-bonus') { // cartelas like "7, 12, 33" (all use the amount field) or "7=50, 12=100" (own amount each)
+    if (!env.HUB) return noHub();
+    const items = [], seen = new Set(), def = Number(b.amount);
+    for (const part of String(b.cartelas || '').split(/[\s,;]+/).filter(Boolean)) {
+      const m = part.match(/^(\d{1,3})(?:[=:](\d+(?:\.\d+)?))?$/); if (!m) return J({ error: 'bad_input' }, 400);
+      const c = Number(m[1]), a = m[2] !== undefined ? Number(m[2]) : def;
+      if (!(c >= 1 && c <= TOTAL) || !(a >= 1 && a <= 100000)) return J({ error: 'bad_input' }, 400);
+      if (!seen.has(c)) { seen.add(c); items.push({ c, a: C(a) }) }
+    }
+    if (!items.length || items.length > 20) return J({ error: 'bad_input' }, 400);
+    const cr = await hubOf(env).current(), first = cr.status === 'lobby' ? cr.id : cr.id + 1; // empty round = the open round, or the next one if a game is running
+    const round = String(b.round ?? '').trim() === '' ? first : Math.floor(Number(b.round));
+    if (!(round >= first && round <= first + 100)) return J({ error: 'bad_round' }, 400);
+    if (round === cr.id && cr.status === 'lobby') { // a cartela already taken in the open round cannot be a bonus any more
+      const taken = (await db.prepare('SELECT cartela FROM picks WHERE round_id=?').bind(round).all()).results.map(x => x.cartela);
+      if (items.some(i => taken.includes(i.c))) return J({ error: 'bonus_taken' }, 409);
+    }
+    await setSet(env, 'bonus', JSON.stringify({ on: true, round, items }));
+    await log('set bonus', 'round ' + round + ' · ' + items.map(i => i.c + '=' + B(i.a)).join(' '));
+    await poke(env);
+    return J({ ok: true, round });
+  }
+  if (name === 'clear-bonus') {
+    await setSet(env, 'bonus', JSON.stringify({ on: false })); await log('clear bonus', ''); await poke(env);
+    return J({ ok: true });
+  }
   if (name === 'game' || name === 'game-start' || name === 'game-stop') {
     if (!env.HUB) return noHub();
     const hub = hubOf(env); let r = await hub.current();
@@ -685,6 +820,8 @@ async function route(req, env, url) {
     const hub = hubOf(env), r = await hub.current();
     if (r.status !== 'lobby' || now - r.start_ts >= LOBBY_MS) return J({ error: 'round_closed' }, 409);
     if (p === '/api/pick' && (await getSet(env, 'paused')) === '1') return J({ error: 'paused' }, 409);
+    const bcf = await bonusFor(env, r.id); // is this a secret-bonus round?
+    if (p === '/api/unpick' && bcf) return J({ error: 'locked' }, 409); // bonus round: a taken cartela can never be dropped or changed
     try {
       if (p === '/api/pick') {
         const res = await db.batch([
@@ -695,8 +832,16 @@ async function route(req, env, url) {
         db.prepare("UPDATE users SET bonus_c=MIN(?5,bonus_c+(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)),balance=balance+(?4-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)) WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3) AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id, r.stake_c, bonusC(env)),
         db.prepare("DELETE FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id)]);
     } catch (e) { return J({ error: errOf(e) }, 409) }
-    const me = await db.prepare('SELECT id,auto_off,balance,bonus_c FROM users WHERE id=?').bind(u.id).first(); // fresh balance after the stake moved
-    return J(await hub.picked(p === '/api/pick' ? 'pick' : 'unpick', r.id, no, u.id, u.name, me));
+    // The pick above succeeded, so the stake was paid. Only now can a bonus cartela win — a player without enough balance never gets here, so no bonus is shown for them.
+    let won = null;
+    if (p === '/api/pick' && bcf) { const it = bcf.items.find(x => x.c === no); if (it) won = await awardBonus(env, r.id, no, u, it.a) }
+    const me = await db.prepare('SELECT id,auto_off,balance,bonus_c FROM users WHERE id=?').bind(u.id).first(); // fresh balance after the stake moved (and the bonus was added)
+    const st = await hub.picked(p === '/api/pick' ? 'pick' : 'unpick', r.id, no, u.id, u.name, me, won);
+    if (won) {
+      say(env, u.id, `🎉 እንኳን ደስ አለዎት! ካርቴላ #${no} በመያዝ የ${won.amount} ብር ቦነስ አሸንፈዋል! ገንዘቡ ወደ ቀሪ ሂሳብዎ ተጨምሯል።`, playKb(env));
+      return J({ ...st, bonus_won: won.amount });
+    }
+    return J(st);
   }
   if (p === '/api/deposit') {
     const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = ['telebirr', 'cbe', 'boa', 'dashen'].includes(b.method) ? b.method : 'telebirr';

@@ -32,6 +32,10 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 .prow .row{border:0;padding:4px 0}
 .prow .acts,.row .acts{flex-wrap:wrap}
 .bantag{color:var(--bad)}
+.form{display:flex;flex-direction:column;gap:8px;padding:12px 0}
+.form label{color:var(--mut);font-size:13px}
+.form input{width:100%}
+.won{color:var(--gold)}
 </style>
 </head>
 <body>
@@ -49,7 +53,7 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 <script>
 // Same address the page is opened from. The old github.io page still talks to the Worker directly.
 const API = location.hostname.endsWith("github.io") ? "https://aman-bingo.amanamazi180.workers.dev" : "";
-const TABS = ["Overview","Pending","Players","Rounds","Game","Log"];
+const TABS = ["Overview","Pending","Players","Rounds","Game","Bonus","Weekly","Log"];
 let q = "";
 const tgd = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) || "";
 if(tgd){ try{ Telegram.WebApp.ready(); Telegram.WebApp.expand(); }catch(e){} }
@@ -69,7 +73,7 @@ async function call(path, body){
   if(r.status===404) throw new Error("The Worker has no route " + path + ". Add this route to worker.js.");
   if(!r.ok){
     const t = await r.text(); let m = t; try { m = JSON.parse(t).error || t; } catch(e){}
-    const nice = { insufficient_balance:"That player does not have enough balance.", bad_input:"Please check the number you entered.", no_player:"Player not found." }[m];
+    const nice = { insufficient_balance:"That player does not have enough balance.", bad_input:"Please check what you entered (cartela numbers 1-400, amount at least 1 birr).", no_player:"Player not found.", bonus_taken:"One of those cartelas is already taken in the open round. Choose other cartelas, or set the bonus for the next round number.", already_paid:"Last week was already paid.", no_prizes:"Set the prizes first (for example 3000, 2000, 1000).", no_winners:"Nobody played last week, so there is nothing to pay.", bad_round:"That round number is not allowed. Leave it empty, or enter a round that has not started yet." }[m];
     throw new Error(nice || ("Server error " + r.status + ": " + t.slice(0,200)));
   }
   return r.json();
@@ -107,6 +111,40 @@ const views = {
       <div class="row"><div class="acts">${d.paused ? '<button class="ok" data-a="resume">Resume game</button>' : '<button class="bad" data-a="pause">Pause new rounds</button>'}<button data-a="game-start">Start round (if idle)</button><button class="bad" data-a="game-stop">Cancel round and refund</button></div></div>
       <div class="row"><div class="acts"><input id="stake" type="number" min="1" step="any" value="${esc(d.next_stake)}" style="width:110px"><button class="pri" data-a="save-stake">Save stake</button></div><small>Stake for new rounds (birr). The current round keeps its stake.</small></div>`;
   },
+  async Bonus(){
+    const d = await call("/api/admin/bonus");
+    // live = the bonus round has not started yet (open lobby, or a round that comes later)
+    const live = d.on && (d.round > d.current || (d.round === d.current && d.status === "lobby"));
+    const head = d.on
+      ? `<div class="grid"><div class="card"><b>Round ${esc(d.round)}</b><span>${live ? "Bonus is waiting for a player" : "Bonus round already started or finished"}</span></div><div class="card"><b>${esc(d.current)}</b><span>Current round (${esc(d.status)})</span></div></div>`
+      : `<div class="empty">No bonus is set. Players see nothing until you save one below.</div>`;
+    const items = d.on ? list(d.items, i => `<div class="row"><div><b>Cartela ${esc(i.c)}</b><small>${esc(i.amount)} birr</small></div><b class="${i.won ? "won" : ""}">${i.won ? "🎉 " + esc(i.won) : "not taken"}</b></div>`) : "";
+    return head + items + `<div class="form">
+      <small style="color:var(--mut)">Secret: only you see these numbers. In a bonus round every taken cartela is locked, and the first player who takes a bonus cartela (and can pay the stake) wins it at once and everybody sees the congratulations.</small>
+      <label>Bonus amount (birr) — used for cartelas written without an amount</label>
+      <input id="bn-amt" type="number" min="1" step="any" value="50">
+      <label>Bonus cartelas — for example: 7, 12, 33  or with their own amount: 7=50, 12=100</label>
+      <input id="bn-c" placeholder="7, 12, 33" autocomplete="off">
+      <label>Round number (leave empty = the open round, or the next one if a game is running)</label>
+      <input id="bn-r" type="number" min="1" step="1" placeholder="auto">
+      <div class="acts" style="display:flex;gap:6px;flex-wrap:wrap"><button class="pri" data-a="save-bonus">Save bonus</button>${d.on ? '<button class="bad" data-a="clear-bonus">Cancel bonus</button>' : ""}</div>
+    </div>`;
+  },
+  async Weekly(){
+    const d = await call("/api/admin/weekly");
+    const rows = (items, empty) => items && items.length ? items.map(x => `<div class="row"><div><b>#${esc(x.rank)} ${esc(x.name)}</b><small>${esc(x.phone)} · ${esc(x.games)} games</small></div><b class="won">${x.prize ? esc(x.prize) + " birr" : "-"}</b></div>`).join("") : `<div class="empty">${empty}</div>`;
+    const left = Math.max(0, d.ends_ts - d.now), days = Math.floor(left / 864e5), hrs = Math.floor(left % 864e5 / 36e5);
+    const canPay = d.last_week.length && !d.last_paid && d.prizes.some(p => p > 0);
+    return `<div class="form">
+      <small style="color:var(--mut)">Players are ranked by games played in the week (Monday 00:00 to Sunday 24:00, Ethiopia time). Players see the ranking and the prizes in the Scores tab. Prizes are paid only when you press the button below, once per week.</small>
+      <label>Prizes for rank 1, 2, 3 ... (up to 10, in birr). Empty = no prizes shown.</label>
+      <input id="wk-pr" placeholder="3000, 2000, 1000, 500, 500, 500, 500, 500, 500, 500" value="${esc(d.prizes.join(", "))}" autocomplete="off">
+      <div class="acts" style="display:flex;gap:6px"><button class="pri" data-a="save-prizes">Save prizes</button></div>
+    </div>
+    <h2 style="font-size:16px;margin:14px 0 0">This week (ends in ${days}d ${hrs}h)</h2>${rows(d.this_week, "Nobody has played this week yet.")}
+    <h2 style="font-size:16px;margin:18px 0 0">Last week ${d.last_paid ? "· ✅ paid" : ""}</h2>${rows(d.last_week, "Nobody played last week.")}
+    ${canPay ? '<div class="form"><button class="ok" data-a="pay-weekly">Pay last week\'s winners</button><small style="color:var(--mut)">Adds each prize to the winner\'s balance and sends them a congratulations message. Can be done only once.</small></div>' : ""}`;
+  },
   async Log(){
     const d = await call("/api/admin/log");
     return list(d.items, x => `<div class="row"><div><b>${esc(x.action)}</b><small>${esc(x.detail)}</small></div><small style="text-align:right">${esc(new Date(x.ts).toLocaleString())}<br>${x.actor === "password" ? "password" : "admin " + esc(x.actor)}</small></div>`);
@@ -136,6 +174,21 @@ $("view").onclick = async e => {
     } else if(a==="save-stake"){
       const v = Number($("stake").value); if(!(v>=1)) return say("Enter a stake of at least 1 birr.", "err");
       await call("/api/admin/set-stake", {stake:v});
+    } else if(a==="save-bonus"){
+      const cartelas = $("bn-c").value.trim(); if(!cartelas) return say("Enter the bonus cartela numbers.", "err");
+      const amount = Number($("bn-amt").value); if(!(amount>=1) && !/=/.test(cartelas)) return say("Enter a bonus amount of at least 1 birr.", "err");
+      const r = await call("/api/admin/set-bonus", {amount, cartelas, round: $("bn-r").value.trim()});
+      say("Bonus saved for round " + r.round + ".", "good"); setTimeout(show, 600); return;
+    } else if(a==="save-prizes"){
+      const r = await call("/api/admin/set-prizes", {prizes: $("wk-pr").value.trim()});
+      say(r.prizes.length ? "Prizes saved." : "Prizes cleared.", "good"); setTimeout(show, 600); return;
+    } else if(a==="pay-weekly"){
+      if(!confirm("Pay last week's winners now? This can be done only once.")) return;
+      const r = await call("/api/admin/pay-weekly", {});
+      say("Paid " + r.total + " birr to " + r.paid + " players.", "good"); setTimeout(show, 600); return;
+    } else if(a==="clear-bonus"){
+      if(!confirm("Cancel the bonus?")) return;
+      await call("/api/admin/clear-bonus", {});
     } else if(a==="pause"||a==="resume"){ await call("/api/admin/pause", {paused: a==="pause"});
     } else await call("/api/admin/"+a, {});
     say("Done.", "good"); setTimeout(show, 600);

@@ -33,6 +33,11 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .grid{flex:1;min-height:140px;overflow-y:auto;-webkit-overflow-scrolling:touch;display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;align-content:start;background:#0d1730;border:1px solid var(--ln);border-radius:18px;padding:8px}
 .n{background:#182650;border:1.5px solid #33477a;border-radius:9px;height:38px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px}
 .n.mine{background:var(--gr);border-color:var(--gr);color:var(--dk)}.n.tk{background:var(--tk);border-color:var(--tk);color:#fff;font-weight:900;opacity:1}
+/* bonus winner's cartela: turns GOLD for everybody after it is announced */
+.n.bn{background:linear-gradient(135deg,#ffe28a,#f5b73b);border-color:#fff7d6;color:#2a1a00;font-weight:900;animation:bnp 1.2s ease-in-out infinite}
+@keyframes bnp{0%,100%{box-shadow:0 0 0 0 #f5b73b88}50%{box-shadow:0 0 12px 3px #f5b73bcc}}
+/* small congratulations line at the top of the lobby, stays until the game starts */
+.bnr{display:none;flex:none;text-align:center;font-size:12px;font-weight:800;line-height:1.4;color:var(--or);background:#2a2208;border:1px solid var(--or);border-radius:10px;padding:5px 8px}
 .prev{display:grid;grid-template-columns:1fr 1fr;gap:8px}.prev:empty{display:none}
 .card{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
 .card .h{border-radius:6px;font-weight:800;text-align:center;padding:3px 0;font-size:13px;color:#fff}
@@ -68,6 +73,21 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 #game .pill b{font-size:15px}
 .gnav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#070e1f;border-top:1px solid var(--ln);padding:6px 0 calc(env(safe-area-inset-bottom,0px) + 4px);z-index:5}
 .gnav div{flex:1;text-align:center;font-size:11px;font-weight:800;color:var(--mu)}.gnav div span{display:block;font-size:20px}.gnav div.on{color:var(--gr)}
+/* weekly top players */
+.wk{display:flex;flex-direction:column;gap:10px}
+.wk .me{background:var(--cd);border:1px solid var(--ln);border-radius:18px;padding:12px 14px}.wk .me b{color:var(--or)}.wk .me small{display:block;color:var(--mu);font-weight:700;margin-top:2px}
+.wk .cg{background:linear-gradient(135deg,#3a2e0a,#12305a);border:1px solid var(--or);border-radius:16px;padding:12px;text-align:center;font-weight:800;line-height:1.5}
+.pod{display:flex;gap:8px;align-items:flex-end}
+.pod .pc{flex:1;min-width:0;border-radius:20px;padding:10px 6px 12px;text-align:center;border:1px solid var(--ln);background:var(--cd)}
+.pod .p1{border-color:var(--or);background:linear-gradient(#3a2e0a,#111c36);padding-bottom:18px;box-shadow:0 0 22px #f5b73b33}
+.pod .p2{border-color:#9aa8c7;background:linear-gradient(#2a3347,#111c36)}.pod .p3{border-color:#b9773c;background:linear-gradient(#3a2614,#111c36)}
+.pod .md{font-size:30px;line-height:1.1}.pod .nm{font-weight:800;font-size:13px;overflow-wrap:anywhere;margin-top:2px}.pod .ph{font-size:10px;color:var(--mu)}
+.pod .gm{font-size:11px;color:var(--mu);font-weight:700;margin-top:2px}.pod .pr{color:var(--or);font-weight:900;font-size:15px;margin-top:4px}
+.rk{display:flex;gap:10px;align-items:center;background:var(--cd);border:1px solid var(--ln);border-radius:14px;padding:10px 12px}
+.rk .no{flex:none;width:34px;height:34px;border-radius:10px;border:1px solid var(--gr);background:#0f2a1c;display:flex;align-items:center;justify-content:center;font-weight:900}
+.rk .in{flex:1;min-width:0}.rk .in b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rk .in small{color:var(--mu);font-weight:700}
+.rk .rt{text-align:right;font-weight:800;font-size:13px;color:var(--mu)}.rk .rt b{display:block;color:var(--or);font-size:15px}
+.wk h3{font-size:14px;color:var(--mu);letter-spacing:.06em;margin-top:4px}
 .toast{position:fixed;left:50%;top:12%;transform:translateX(-50%);background:var(--rd);color:#fff;font-weight:800;padding:12px 20px;border-radius:14px;z-index:20;display:none;max-width:90vw;text-align:center}
 </style></head><body>
 <div class="toast" id="toast"></div>
@@ -81,10 +101,11 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 </div>
 
 <div class="s" id="lobby">
+  <div class="bnr" id="bnr"></div>
   <div class="pill t" style="flex:none;padding:10px"><small>DERASH</small><b id="lder" style="font-size:34px">0</b> <small style="display:inline">birr</small></div>
   <div class="row"><button class="gb" onclick="backHome()">← Back</button><div style="flex:1"></div><button class="gb" onclick="key='';tick()">⟳ Refresh</button></div>
   <div class="row"><div class="pill"><small>MAIN WALLET</small><b id="lm">0</b></div><div class="pill"><small>PLAY WALLET</small><b id="lp">0</b></div><div class="pill"><small>STAKE</small><b id="ls">10</b></div><div class="pill"><small>PLAYERS</small><b id="lpl">0</b></div><div class="pill t"><b id="lt">-</b></div></div>
-  <p class="hint">Tap numbers to pick your cartela (max 2). <span style="color:#22c55e">Green</span> = yours · <span style="color:#dc2626;font-weight:900">red</span> = taken</p>
+  <p class="hint">Tap numbers to pick your cartela (max 2). <span style="color:#22c55e">Green</span> = yours · <span style="color:#dc2626;font-weight:900">red</span> = taken · <span style="color:#f5b73b;font-weight:900">gold</span> = bonus winner</p>
   <div class="grid" id="grid"></div>
   <div class="prev" id="prev"></div>
 </div>
@@ -124,12 +145,12 @@ const $=i=>document.getElementById(i),CL=["#3b82f6","#06b6d4","#22c55e","#f5b73b
 const L=n=>"BINGO"[Math.floor((n-1)/15)],F=n=>String(+Number(n).toFixed(2));
 const PAY={telebirr:{n:"Telebirr",a:"0958828304",h:"AMANUEL"},cbe:{n:"CBE",a:"0958828304",h:"AMANUEL YISMAH"},boa:{n:"BOA",a:"266199511",h:"AMANUEL YISMAH"},dashen:{n:"Dashen Bank",a:"5901914597011",h:"AMANUEL YISMAH"}};
 const LG={telebirr:["#0a8fd8","T"],boa:["#c9a227","B"],dashen:["#1b4fa3","D"],cbe:["#7b2a7e","C"]};
-const ERR={no_api:"Server address is not set in index.html (API line)",not_registered:"Please register in the bot first (share your contact)",insufficient_balance:"Not enough balance - deposit first",round_closed:"Round already started",max_cards:"You can take only 2 cards",taken:"Card already taken",bad_input:"Check the numbers you entered",txid_used:"This transaction ID was already used",deposit_required:"Make a deposit before withdrawing",withdraw_pending:"You already have a pending withdrawal. Wait until it is approved.",unauthorized:"Open this game from the Telegram bot",server_error:"Server error, try again",banned:"Your account is blocked. Contact support.",paused:"Game is paused for now"};
+const ERR={no_api:"Server address is not set in index.html (API line)",not_registered:"Please register in the bot first (share your contact)",insufficient_balance:"Not enough balance - deposit first",round_closed:"Round already started",max_cards:"You can take only 2 cards",taken:"Card already taken",bad_input:"Check the numbers you entered",txid_used:"This transaction ID was already used",deposit_required:"Make a deposit before withdrawing",withdraw_pending:"You already have a pending withdrawal. Wait until it is approved.",unauthorized:"Open this game from the Telegram bot",server_error:"Server error, try again",banned:"Your account is blocked. Contact support.",paused:"Game is paused for now",locked:"🔒 This round is locked: a taken cartela can't be changed"};
 let ready=false,S=null,off=0,inGame=false,looping=false,snd_on=true,lastN=0,rid=0,key="",reg=false,pend=0,gkey="";
 function show(id){document.querySelectorAll(".s").forEach(e=>e.classList.remove("on"));$(id).classList.add("on");$("gnav").style.display=id==="game"?"none":"flex";if(id!=="game")stopVoice()}
 function setNav(i){document.querySelectorAll("#gnav div").forEach((d,k)=>d.classList.toggle("on",k===i))}
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let _t;function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(_t);_t=setTimeout(()=>t.style.display="none",2600)}
+let _t;function toast(m,ok){const t=$("toast");t.textContent=m;t.style.background=ok?"var(--gr)":"var(--rd)";t.style.color=ok?"var(--dk)":"#fff";t.style.display="block";clearTimeout(_t);_t=setTimeout(()=>t.style.display="none",ok?5000:2600)}
 function initData(){let d=tg&&tg.initData||"";if(!d){try{d=new URLSearchParams(location.hash.slice(1)).get("tgWebAppData")||""}catch(e){}}return d}
 async function api(p,b){if(API.indexOf("PASTE_")===0)throw"no_api";const c=new AbortController(),to=setTimeout(()=>c.abort(),10000);try{const r=await fetch(API+p,{method:b?"POST":"GET",headers:{"content-type":"application/json","x-init-data":initData()},body:b?JSON.stringify(b):undefined,signal:c.signal});const d=await r.json().catch(()=>({}));if(!r.ok)throw d.error||"server_error";return d}catch(e){throw e&&e.name==="AbortError"?"server_error":e}finally{clearTimeout(to)}}
 
@@ -217,25 +238,35 @@ function render(){
   if(r.status==="lobby"){$("win").classList.remove("on");show("lobby");drawLobby()}
   else{show("game");drawGame()}
 }
+/* secret bonus: S.bround = { locked, wins:[{cartela,name,amount}] }. The secret cartela numbers are never sent by the server. */
+const bonusInfo=()=>(S&&S.bround)||{locked:false,wins:[]};
 function drawLobby(){
   const r=S.round,left=Math.max(0,Math.ceil((r.start_ts+r.lobby_ms-(Date.now()+off))/1000));
   $("lt").textContent=left+"s";$("lm").textContent=F(S.balance);$("lp").textContent=F(S.bonus);$("ls").textContent=r.stake;
   $("lder").textContent=F(S.taken.length*r.stake*0.8);
   $("lpl").textContent=S.taken.length;
-  const k=JSON.stringify([S.taken,S.mine]);if(k===key)return;key=k;
-  let h="";for(let i=1;i<=400;i++)h+=`<div class="n${S.mine.includes(i)?" mine":S.taken.includes(i)?" tk":""}" onclick="pick(${i})">${i}</div>`;
+  const bi=bonusInfo(),bw=bi.wins||[];
+  const k=JSON.stringify([S.taken,S.mine,bw]);if(k===key)return;key=k;
+  const bnr=$("bnr");
+  if(bw.length){bnr.innerHTML=bw.map(w=>"🎉 Congratulations "+esc(w.name)+"! Won "+F(w.amount)+" birr bonus · Cartela #"+w.cartela).join("<br>");bnr.style.display="block"}
+  else{bnr.innerHTML="";bnr.style.display="none"}
+  const gold=new Set(bw.map(w=>w.cartela));
+  let h="";for(let i=1;i<=400;i++)h+=`<div class="n${gold.has(i)?" bn":S.mine.includes(i)?" mine":S.taken.includes(i)?" tk":""}" onclick="pick(${i})">${i}</div>`;
   const g=$("grid"),sc=g.scrollTop;g.innerHTML=h;g.scrollTop=sc;
   $("prev").innerHTML=S.mine.map(n=>`<div><div class="cn">CARTELA #${n}</div>${cardHTML(n,[])}</div>`).join("");
 }
 async function pick(n){
   if(S.taken.includes(n)&&!S.mine.includes(n))return;
   const had=S.mine.includes(n);
+  if(had&&bonusInfo().locked){toast(ERR.locked);return} /* bonus round: a taken cartela can't be dropped or changed */
   if(!had&&S.mine.length>=2){toast(ERR.max_cards);return}
   const bk=[S.mine.slice(),S.taken.slice()];
   if(had){S.mine=S.mine.filter(x=>x!==n);S.taken=S.taken.filter(x=>x!==n)}
   else{S.mine.push(n);S.taken.push(n)}
   key="";drawLobby();pend++;
-  try{const s=await api(had?"/api/unpick":"/api/pick",{cartela:n});if(pend===1){S=s;key="";render()}
+  try{const s=await api(had?"/api/unpick":"/api/pick",{cartela:n});
+    if(s.bonus_won)toast("🎉 Congratulations! You won "+F(s.bonus_won)+" birr bonus!",1);
+    if(pend===1){S=s;key="";render()}
     if(tg&&tg.HapticFeedback)tg.HapticFeedback.selectionChanged()}
   catch(e){if(pend===1){S.mine=bk[0];S.taken=bk[1];key="";drawLobby()}toast(ERR[e]||e)}
   finally{pend--;if(pend===0)tick()}
@@ -266,7 +297,11 @@ function drawGame(){
     $("ws").textContent="Next round in "+sec+"s"}
   else ov.classList.remove("on");
 }
-async function backHome(){inGame=false;for(const n of S.mine.slice()){try{await api("/api/unpick",{cartela:n})}catch(e){}}goHome()}
+async function backHome(){
+  inGame=false;
+  if(bonusInfo().locked){toast("🔒 Your cartela stays locked for this round")} /* bonus round: cartelas cannot be released */
+  else for(const n of S.mine.slice()){try{await api("/api/unpick",{cartela:n})}catch(e){}}
+  goHome()}
 function leaveGame(){inGame=false;$("win").classList.remove("on");goHome()}
 
 /* wallet */
@@ -286,9 +321,25 @@ async function openWallet(){show("wal");setNav(3);$("wform").innerHTML="";try{co
   $("whist").innerHTML=hrows(me)}catch(e){toast(ERR[e]||e)}}
 async function dep(){try{const d=await api("/api/deposit",{amount:$("fa1").value,txid:$("fa2").value,method:sel});toast(d.status==="approved"?"✅ Deposit received":"✅ Deposit submitted. Your balance updates as soon as it is confirmed.");openWallet()}catch(e){toast(ERR[e]||e)}}
 async function wd(){try{await api("/api/withdraw",{amount:$("fa1").value,account:$("fa2").value,name:$("fa3").value,method:wsel});toast("✅ Withdrawal requested - Pending");openWallet()}catch(e){toast(ERR[e]||e)}}
-function tabTo(i){inGame=false;$("win").classList.remove("on");setNav(i);if(i===0){goHome();return}if(i===3){openWallet();return}show("tab");$("tabc").innerHTML='<p class="hint">…</p>';if(i===1)scoresPage("daily");else if(i===2)histPage();else profPage()}
+function tabTo(i){inGame=false;$("win").classList.remove("on");setNav(i);if(i===0){goHome();return}if(i===3){openWallet();return}show("tab");$("tabc").innerHTML='<p class="hint">…</p>';if(i===1)scoresPage("weekly");else if(i===2)histPage();else profPage()}
+const pz=x=>x>0?F(x)+" birr":"";
+function wkLeft(ts){const l=Math.max(0,ts-(Date.now()+off)),d=Math.floor(l/864e5),h=Math.floor(l%864e5/36e5);return d+"d "+h+"h"}
+function wkHTML(d){
+  const top=d.top||[],me=d.me||{},md=["🥇","🥈","🥉"];
+  let h='<div class="wk">';
+  if(d.won)h+=`<div class="cg">🎉 እንኳን ደስ አለዎት!<br>የሳምንቱ ከፍተኛ ተጫዋች ራንክ አሸናፊ ሆነዋል<br><span style="color:var(--or)">#${d.won.rank} · ${d.won.games} ጨዋታ${d.won.prize>0?" · "+F(d.won.prize)+" ብር":""}</span></div>`;
+  h+=`<div class="me"><b>My rank</b>: ${me.rank?"#"+me.rank:"not ranked yet"} · ${me.played||0} games${me.prize>0?" · prize "+pz(me.prize):""}<small>Week ends in ${wkLeft(d.ends_ts)} · the more games you play, the higher you rank</small></div>`;
+  if(!top.length)h+='<p class="hint" style="padding:18px 0">Nobody has played this week yet. Be the first!</p>';
+  const pc=(x,c)=>x?`<div class="pc ${c}"><div class="md">${md[x.rank-1]}</div><div class="nm">${esc(x.name)}</div><div class="ph">${esc(x.phone)}</div><div class="gm">${x.games} games</div>${x.prize>0?`<div class="pr">${pz(x.prize)}</div>`:""}</div>`:"";
+  if(top.length)h+=`<div class="pod">${pc(top[1],"p2")}${pc(top[0],"p1")}${pc(top[2],"p3")}</div>`;
+  if(top.length>3)h+='<h3>4 — '+(top.length>=10?"10":top.length)+'</h3>'+top.slice(3).map(x=>`<div class="rk"><div class="no">${x.rank}</div><div class="in"><b>${esc(x.name)}</b><small>${esc(x.phone)}</small></div><div class="rt">${x.games} games${x.prize>0?`<b>${pz(x.prize)}</b>`:""}</div></div>`).join("");
+  const lw=d.last&&d.last.winners||[];
+  if(lw.length)h+='<h3>LAST WEEK\'S WINNERS</h3>'+lw.map(x=>`<div class="rk"><div class="no">${x.rank}</div><div class="in"><b>${esc(x.name)}</b><small>${x.games} games</small></div><div class="rt"><b>${pz(x.prize)}</b></div></div>`).join("");
+  return h+"</div>"}
 async function scoresPage(p){try{const d=await api("/api/leaderboard?period="+p),me=d.me||{},on=";background:var(--gr);color:var(--dk)";
-  $("tabc").innerHTML=`<div class="li"><span>My rank</span><span>${me.rank?"#"+me.rank:"—"} · ${me.played||0} games</span></div><div class="row"><button class="gb" style="flex:1${p==="daily"?on:""}" onclick="scoresPage('daily')">DAILY</button><button class="gb" style="flex:1${p==="weekly"?on:""}" onclick="scoresPage('weekly')">WEEKLY</button></div><p class="hint">TOP 10 PLAYERS</p>`+(d.top||[]).map((r,i)=>`<div class="li"><span>${i+1}. ${esc(r[0])}</span><span>${r[1]} games</span></div>`).join("")}catch(e){toast(ERR[e]||e)}}
+  const tabs=`<div class="row"><button class="gb" style="flex:1${p==="weekly"?on:""}" onclick="scoresPage('weekly')">WEEKLY</button><button class="gb" style="flex:1${p==="daily"?on:""}" onclick="scoresPage('daily')">DAILY</button></div>`;
+  if(d.now)off=d.now-Date.now();
+  $("tabc").innerHTML=tabs+(p==="weekly"?wkHTML(d):`<div class="li"><span>My rank</span><span>${me.rank?"#"+me.rank:"—"} · ${me.played||0} games</span></div><p class="hint">TOP 10 PLAYERS TODAY</p>`+(d.top||[]).map((r,i)=>`<div class="li"><span>${i+1}. ${esc(r[0])}</span><span>${r[1]} games</span></div>`).join(""))}catch(e){toast(ERR[e]||e)}}
 async function histPage(){try{const me=await api("/api/me"),h=hrows(me);$("tabc").innerHTML=h||'<p class="hint">No history yet.</p>'}catch(e){toast(ERR[e]||e)}}
 async function profPage(){try{const me=await api("/api/me");$("tabc").innerHTML=`<div class="li"><span>Name</span><span>${esc(me.name)}</span></div><div class="li"><span>Telegram ID</span><span>${me.id}</span></div><div class="li"><span>Phone</span><span>${esc(me.phone||"-")}</span></div>`}catch(e){toast(ERR[e]||e)}}
 async function toggleAuto(){const a=!S.auto;S.auto=a;drawGame();try{await api("/api/auto",{auto:a})}catch(e){S.auto=!a;drawGame();toast(ERR[e]||e)}}
