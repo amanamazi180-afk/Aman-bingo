@@ -293,6 +293,5 @@ async function toggleAuto(){const a=!S.auto;S.auto=a;drawGame();try{await api("/
 async function claim(){try{S=await api("/api/bingo",{});off=S.now-Date.now();render()}catch(e){toast(e==="no_bingo"?"❌ No bingo yet":e==="round_over"?"Round already finished":(ERR[e]||e))}}
 function cp(t,e){if(e)e.stopPropagation();const ok=()=>toast("✅ Copied "+t);function fb(){const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();try{document.execCommand("copy");ok()}catch(x){}a.remove()}try{navigator.clipboard.writeText(t).then(ok,fb)}catch(x){fb()}}
 buildBoard();
-preload();
 boot();
 </script></body></html>

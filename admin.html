@@ -47,8 +47,8 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 </div>
 
 <script>
-// Your Worker address. Change only if it moves.
-const API = "https://aman-bingo.amanamazi180.workers.dev";
+// Same address the page is opened from. The old github.io page still talks to the Worker directly.
+const API = location.hostname.endsWith("github.io") ? "https://aman-bingo.amanamazi180.workers.dev" : "";
 const TABS = ["Overview","Pending","Players","Rounds","Game","Log"];
 let q = "";
 const tgd = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) || "";
@@ -64,7 +64,7 @@ async function call(path, body){
   if(body){ opt.method="POST"; opt.body=JSON.stringify(body); }
   let r;
   try { r = await fetch(API + path, opt); }
-  catch(e){ throw new Error("Cannot reach " + API + path + ". The Worker is down, the address is wrong, or the Worker does not allow requests from this page (CORS)."); }
+  catch(e){ throw new Error("Cannot reach " + (API || location.origin) + path + ". The Worker is down or the address is wrong."); }
   if(r.status===401||r.status===403) throw new Error("Wrong admin password.");
   if(r.status===404) throw new Error("The Worker has no route " + path + ". Add this route to worker.js.");
   if(!r.ok){
