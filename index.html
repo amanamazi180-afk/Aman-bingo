@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><meta http-equiv="Expires" content="0">
 <title>አማን BINGO</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@800;900&display=swap" media="print" onload="this.media='all'">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -375,6 +376,11 @@ function st(){clearInterval(t);t=setInterval(()=>{if($("home").classList.contain
 bn.addEventListener("touchstart",e=>{sx=e.touches[0].clientX;clearInterval(t)},{passive:true});
 bn.addEventListener("touchend",e=>{if(sx!==null){const d=e.changedTouches[0].clientX-sx;if(Math.abs(d)>40)go(d<0?i+1:i-1)}sx=null;st()},{passive:true});
 go(0);st()})();
+/* AUTO-UPDATE: every time the game opens it checks the server for a newer version and reloads itself once.
+   When you publish a new index.html, change this BUILD text (e.g. 20261013a) so players pick it up. */
+const BUILD="20261012a";
+(function(){try{fetch(location.pathname+"?c="+Date.now(),{cache:"no-store"}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD="([^"]+)"/);
+  if(m&&m[1]!==BUILD&&new URLSearchParams(location.search).get("v")!==m[1])location.replace(location.pathname+"?v="+m[1]+location.hash)}).catch(()=>{})}catch(e){}})();
 buildBoard();
 boot();
 </script></body></html>
