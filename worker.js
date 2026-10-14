@@ -9,6 +9,7 @@
 // SECRET BONUS: the admin chooses cartela numbers for one round (Admin > Bonus). The player who takes one of them wins the bonus at once and is announced to everybody.
 // In a bonus round every taken cartela is locked (nobody can drop or change it), and the secret cartela numbers are never sent to the phones.
 // WEEKLY TOP PLAYERS: players are ranked by games played in the week (Monday 00:00 - Sunday 24:00 Ethiopia time). The admin sets the prizes (Admin > Weekly) and pays last week's winners with one button.
+// BOTTOM KEYBOARD: the bot shows a permanent keyboard under the chat box (Play Games, Deposit, Check Balance) after /start and after registration.
 import { DurableObject } from 'cloudflare:workers';
 const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 400, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
@@ -110,10 +111,14 @@ const say = async (env, chat, text, kb) => { // the Admin button is added only f
 };
 const playKb = env => [[{ text: '🎮 ተጫወት', web_app: { url: env.GAME_URL } }]];
 
-/* ---------- bot menu (inline buttons, like DIL BINGO) and Amharic texts ---------- */
+/* ---------- bot menu (inline buttons, like DIL BINGO), bottom keyboard and Amharic texts ---------- */
 const SUPPORT = '@Amanbing2';
 const BTN = { play: '🎮 ጨዋታ ተጫወት', dep: '💰 ገንዘብ አስገባ', bal: '💳 ቀሪ ሂሳብ', sup: '🆘 እርዳታ' }; // old bottom-keyboard texts, still understood
+const BOT = { play: '🎮 Play Games', dep: '💰 Deposit', bal: '💲 Check Balance' }; // the permanent keyboard under the chat box
+const BOTTOM_KB = { keyboard: [[{ text: BOT.play }, { text: BOT.dep }], [{ text: BOT.bal }]], resize_keyboard: true, is_persistent: true };
+const isBtn = t => Object.values(BTN).includes(t) || Object.values(BOT).includes(t);
 const sendTo = (env, chat, text, markup) => tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: markup });
+const sendBottom = (env, chat, text) => sendTo(env, chat, text, BOTTOM_KB); // shows (or refreshes) the bottom keyboard
 const SHARE_KB = { keyboard: [[{ text: '📱 ስልክ ቁጥሬን አጋራ', request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
 const menuKb = env => [
   [{ text: 'Play 🎮', web_app: { url: env.GAME_URL } }],
@@ -150,12 +155,13 @@ async function onContact(env, m) { // the player shared their phone number: regi
   const nm = String(c.first_name || m.from.first_name || 'player').trim().slice(0, 30) || 'player';
   await db.prepare('INSERT INTO users(id,name,created_ts) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING').bind(uid, nm, now).run();
   const u = await db.prepare('SELECT phone FROM users WHERE id=?').bind(uid).first();
-  if (u && u.phone) return sendMenu(env, uid, '✅ አስቀድመው ተመዝግበዋል።');
+  if (u && u.phone) { await sendBottom(env, uid, '✅ አስቀድመው ተመዝግበዋል።'); return sendMenu(env, uid, '🎮 ከታች ካሉት አማራጮች ይምረጡ።') }
   let ok = false;
   try { ok = (await db.prepare("UPDATE users SET name=?1,phone=?2,balance=balance+?3 WHERE id=?4 AND (phone IS NULL OR phone='')").bind(nm, ph, welcomeC(env), uid).run()).meta.changes > 0 }
   catch (e) { return sendTo(env, uid, `⚠️ ይህ ስልክ ቁጥር በሌላ አካውንት ተመዝግቧል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`, SHARE_KB) }
-  if (!ok) return sendMenu(env, uid, '✅ አስቀድመው ተመዝግበዋል።');
-  return sendMenu(env, uid, '✅ ተመዝግበዋል!' + (welcomeC(env) > 0 ? ` የ ${B(welcomeC(env))} ብር ስጦታ ተሰጥቶዎታል።` : '') + '\n\nለመጫወት «Play» ን ይጫኑ።');
+  if (!ok) { await sendBottom(env, uid, '✅ አስቀድመው ተመዝግበዋል።'); return sendMenu(env, uid, '🎮 ከታች ካሉት አማራጮች ይምረጡ።') }
+  await sendBottom(env, uid, '✅ ተመዝግበዋል!' + (welcomeC(env) > 0 ? ` የ ${B(welcomeC(env))} ብር ስጦታ ተሰጥቶዎታል።` : '') + '\n\nለመጫወት ወይም ገንዘብ ለማስገባት ከታች ያሉትን ቁልፎች ይጫኑ።');
+  return sendMenu(env, uid, '🎮 ለመጫወት «Play» ን ይጫኑ።');
 }
 
 /* ---------- money operations (each is one atomic batch) ---------- */
@@ -558,12 +564,12 @@ async function onTelegram(env, up) {
   if (m.contact) return onContact(env, m); // player shared their phone number
   if (!m.text) return;
   const text = m.text.trim(), cmd = text.split(/[\s@]/)[0].toLowerCase(), uid = m.from.id; await refreshBonus(env, uid, Date.now()); const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(uid).first();
-  if (text.startsWith('/') || Object.values(BTN).includes(text) || text === 'Admin 🛠') await clearState(env, uid); // a command or menu text always leaves any flow
+  if (text.startsWith('/') || isBtn(text) || text === 'Admin 🛠') await clearState(env, uid); // a command or menu text always leaves any flow
   if (cmd === '/start' && !(u && u.phone)) { // remember who invited this player
     const mm = text.match(/^\/start(?:@\w+)?\s+ref(\d+)/i);
     if (mm && Number(mm[1]) !== uid) await db.prepare('INSERT OR IGNORE INTO referrals(user_id,ref_id,ts) VALUES(?,?,?)').bind(uid, Number(mm[1]), Date.now()).run();
   }
-  if (cmd === '/balance' || text === BTN.bal) {
+  if (cmd === '/balance' || text === BTN.bal || text === BOT.bal) {
     if (!u || !u.phone) return askContact(env, uid);
     return menuAction(env, u, 'bal');
   }
@@ -602,9 +608,10 @@ async function onTelegram(env, up) {
   }
   if (!u || !u.phone) return askContact(env, uid); // new player: must share the phone number first
   if (await isBanned(env, uid)) return sendTo(env, uid, `⛔ አካውንትዎ ታግዷል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`);
+  if (cmd === '/start') { await sendBottom(env, uid, '👋 ሰላም!\n\nለመጫወት ወይም ገንዘብ ለማስገባት ከታች ያሉትን ቁልፎች ይጫኑ።'); return sendMenu(env, uid, '🎮 ሌሎች አማራጮች ከታች አሉ።') } // shows the bottom keyboard + the inline menu
   const st = await getState(env, uid); if (st) { const h = await onStep(env, u, st, text); if (h !== null && h !== undefined) return h; if (st.step === 'dep_paste') return } // inside a flow: the step handles the message
-  if (text === BTN.play || cmd === '/play') return sendTo(env, uid, '🎮 ለመጫወት ከታች ያለውን ቁልፍ ይጫኑ።', { inline_keyboard: playKb(env) });
-  if (text === BTN.dep || cmd === '/deposit') return menuAction(env, u, 'dep');
+  if (text === BTN.play || text === BOT.play || cmd === '/play') return sendTo(env, uid, '🎮 ለመጫወት ከታች ያለውን ቁልፍ ይጫኑ።', { inline_keyboard: playKb(env) });
+  if (text === BTN.dep || text === BOT.dep || cmd === '/deposit') return menuAction(env, u, 'dep');
   if (text === BTN.sup || cmd === '/support') return sendTo(env, uid, `🆘 ለእርዳታ ያነጋግሩን: ${SUPPORT}`, { inline_keyboard: [[{ text: 'Contact Support... 🆘', url: 'https://t.me/' + SUPPORT.slice(1) }]] });
   if (cmd === '/withdraw') return menuAction(env, u, 'wd');
   if (cmd === '/transfer') return menuAction(env, u, 'tr');
