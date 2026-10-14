@@ -118,7 +118,7 @@ const BOT = { play: '🎮 Play Games', dep: '💰 Deposit', bal: '💲 Check Bal
 const BOTTOM_KB = { keyboard: [[{ text: BOT.play }, { text: BOT.dep }], [{ text: BOT.bal }]], resize_keyboard: true, is_persistent: true };
 const isBtn = t => Object.values(BTN).includes(t) || Object.values(BOT).includes(t);
 const sendTo = (env, chat, text, markup) => tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: markup });
-const sendBottom = (env, chat, text) => sendTo(env, chat, text, BOTTOM_KB); // shows (or refreshes) the bottom keyboard
+const sendBottom = async (env, chat, text) => { try { await env.DB.prepare('INSERT OR IGNORE INTO kb_sent(uid) VALUES(?)').bind(chat).run() } catch (e) { } return sendTo(env, chat, text, BOTTOM_KB) }; // shows (or refreshes) the bottom keyboard and remembers that this player has it
 const SHARE_KB = { keyboard: [[{ text: '📱 ስልክ ቁጥሬን አጋራ', request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
 const menuKb = env => [
   [{ text: 'Play 🎮', web_app: { url: env.GAME_URL } }],
@@ -225,6 +225,7 @@ const ensureTables = async env => { if (tablesReady) return; await env.DB.batch(
   env.DB.prepare('CREATE TABLE IF NOT EXISTS bans(id INTEGER PRIMARY KEY)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT,ts INTEGER,actor TEXT,action TEXT,detail TEXT)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS bot_state(uid INTEGER PRIMARY KEY,step TEXT,data TEXT,ts INTEGER)'),
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS kb_sent(uid INTEGER PRIMARY KEY)'), // players who already received the bottom keyboard
   env.DB.prepare('CREATE TABLE IF NOT EXISTS referrals(user_id INTEGER PRIMARY KEY,ref_id INTEGER,ts INTEGER)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS bonus_wins(round_id INTEGER,cartela INTEGER,user_id INTEGER,name TEXT,amount_c INTEGER,paid INTEGER DEFAULT 0,ts INTEGER,PRIMARY KEY(round_id,cartela))'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_games(week INTEGER,user_id INTEGER,games INTEGER DEFAULT 0,PRIMARY KEY(week,user_id))'), // games played per player per week (Monday 00:00 Ethiopia time)
@@ -606,9 +607,19 @@ async function onTelegram(env, up) {
     await setSet(env, 'bc_cursor', String(rows[rows.length - 1].id));
     return say(env, uid, `📤 Sent to ${rows.length} players. Send /more for the next batch.`);
   }
+  if (isOwner(env, uid) && cmd === '/keyboard') { // pushes the bottom keyboard to every registered player, 40 at a time. Send /keyboard again for the next batch, "/keyboard reset" to start over.
+    if (/reset/i.test(m.text)) await setSet(env, 'kb_cursor', '0');
+    const cur = Number(((await db.prepare("SELECT v FROM settings WHERE k='kb_cursor'").first()) || {}).v || 0);
+    const rows = (await db.prepare('SELECT id FROM users WHERE phone IS NOT NULL AND id>? ORDER BY id LIMIT 40').bind(cur).all()).results;
+    if (!rows.length) return say(env, uid, '✅ Everyone has the keyboard now.');
+    await Promise.all(rows.map(r => sendBottom(env, r.id, '⌨️ አዲስ! ከታች ያሉትን ቁልፎች (Play Games, Deposit, Check Balance) መጠቀም ይችላሉ።')));
+    await setSet(env, 'kb_cursor', String(rows[rows.length - 1].id));
+    return say(env, uid, `⌨️ Keyboard sent to ${rows.length} players. Send /keyboard again for the next batch.`);
+  }
   if (!u || !u.phone) return askContact(env, uid); // new player: must share the phone number first
   if (await isBanned(env, uid)) return sendTo(env, uid, `⛔ አካውንትዎ ታግዷል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`);
   if (cmd === '/start') { await sendBottom(env, uid, '👋 ሰላም!\n\nለመጫወት ወይም ገንዘብ ለማስገባት ከታች ያሉትን ቁልፎች ይጫኑ።'); return sendMenu(env, uid, '🎮 ሌሎች አማራጮች ከታች አሉ።') } // shows the bottom keyboard + the inline menu
+  if (!(await db.prepare('SELECT 1 x FROM kb_sent WHERE uid=?').bind(uid).first())) await sendBottom(env, uid, '⌨️ አዲስ! ከታች ያሉትን ቁልፎች (Play Games, Deposit, Check Balance) መጠቀም ይችላሉ።'); // old players get the bottom keyboard once, on their next message
   const st = await getState(env, uid); if (st) { const h = await onStep(env, u, st, text); if (h !== null && h !== undefined) return h; if (st.step === 'dep_paste') return } // inside a flow: the step handles the message
   if (text === BTN.play || text === BOT.play || cmd === '/play') return sendTo(env, uid, '🎮 ለመጫወት ከታች ያለውን ቁልፍ ይጫኑ።', { inline_keyboard: playKb(env) });
   if (text === BTN.dep || text === BOT.dep || cmd === '/deposit') return menuAction(env, u, 'dep');
