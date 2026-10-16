@@ -9,9 +9,10 @@
 // SECRET BONUS: the admin chooses cartela numbers for one round (Admin > Bonus). The player who takes one of them wins the bonus at once and is announced to everybody.
 // In a bonus round every taken cartela is locked (nobody can drop or change it), and the secret cartela numbers are never sent to the phones.
 // WEEKLY TOP PLAYERS: players are ranked by games played in the week (Monday 00:00 - Sunday 24:00 Ethiopia time). The admin sets the prizes (Admin > Weekly) and pays last week's winners with one button.
-// BOTTOM KEYBOARD: the bot shows a permanent keyboard under the chat box (Play Games, Deposit, Check Balance) after /start and after registration.
+// BOTTOM KEYBOARD: the bot shows a permanent keyboard under the chat box (ጨዋታ ተጫወት, ገንዘብ አስገባ, ቀሪ ሂሳብ) after /start and after registration.
+// LANGUAGE: every message and button the bot sends is in Amharic. CARTELAS: 1 to 600 (TOTAL below).
 import { DurableObject } from 'cloudflare:workers';
-const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 400, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
+const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 600, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
 const welcomeC = env => C(env.WELCOME_BONUS ?? 10); // one-time gift when a player registers
 const bonusC = env => C(env.DAILY_BONUS ?? 0), // daily bonus is off unless DAILY_BONUS is set
@@ -114,21 +115,23 @@ const playKb = env => [[{ text: '🎮 ተጫወት', web_app: { url: env.GAME_UR
 /* ---------- bot menu (inline buttons, like DIL BINGO), bottom keyboard and Amharic texts ---------- */
 const SUPPORT = '@Amanbing2';
 const BTN = { play: '🎮 ጨዋታ ተጫወት', dep: '💰 ገንዘብ አስገባ', bal: '💳 ቀሪ ሂሳብ', sup: '🆘 እርዳታ' }; // old bottom-keyboard texts, still understood
-const BOT = { play: '🎮 Play Games', dep: '💰 Deposit', bal: '💲 Check Balance' }; // the permanent keyboard under the chat box
+const BOT = { play: '🎮 ጨዋታ ተጫወት', dep: '💰 ገንዘብ አስገባ', bal: '💲 ቀሪ ሂሳብ' }; // the permanent keyboard under the chat box (Amharic)
+const LEG = { '🎮 Play Games': BOT.play, '💰 Deposit': BOT.dep, '💲 Check Balance': BOT.bal }; // the OLD English keyboard texts: players who still have that keyboard keep working
 const BOTTOM_KB = { keyboard: [[{ text: BOT.play }, { text: BOT.dep }], [{ text: BOT.bal }]], resize_keyboard: true, is_persistent: true };
-const isBtn = t => Object.values(BTN).includes(t) || Object.values(BOT).includes(t);
+const isBtn = t => Object.values(BTN).includes(t) || Object.values(BOT).includes(t) || t in LEG;
 const sendTo = (env, chat, text, markup) => tg(env, 'sendMessage', { chat_id: chat, text, reply_markup: markup });
 const sendBottom = async (env, chat, text) => { try { await env.DB.prepare('INSERT OR IGNORE INTO kb_sent(uid) VALUES(?)').bind(chat).run() } catch (e) { } return sendTo(env, chat, text, BOTTOM_KB) }; // shows (or refreshes) the bottom keyboard and remembers that this player has it
 const SHARE_KB = { keyboard: [[{ text: '📱 ስልክ ቁጥሬን አጋራ', request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
 const menuKb = env => [
-  [{ text: 'Play 🎮', web_app: { url: env.GAME_URL } }],
-  [{ text: 'Balance 💵', callback_data: 'm:bal' }, { text: 'Deposit 💰', callback_data: 'm:dep' }],
-  [{ text: 'Contact Support... 🆘', url: 'https://t.me/' + SUPPORT.slice(1) }, { text: 'Instruction 📖', callback_data: 'm:ins' }],
-  [{ text: 'Transfer 🎁', callback_data: 'm:tr' }, { text: 'Withdraw 🤑', callback_data: 'm:wd' }],
-  [{ text: 'Invite 🔗', callback_data: 'm:inv' }]];
+  [{ text: 'ተጫወት 🎮', web_app: { url: env.GAME_URL } }],
+  [{ text: 'ቀሪ ሂሳብ 💵', callback_data: 'm:bal' }, { text: 'ገንዘብ አስገባ 💰', callback_data: 'm:dep' }],
+  [{ text: 'እርዳታ 🆘', url: 'https://t.me/' + SUPPORT.slice(1) }, { text: 'መመሪያ 📖', callback_data: 'm:ins' }],
+  [{ text: 'አስተላልፍ 🎁', callback_data: 'm:tr' }, { text: 'አውጣ 🤑', callback_data: 'm:wd' }],
+  [{ text: 'ጋብዝ 🔗', callback_data: 'm:inv' }]];
 const sendMenu = (env, chat, text) => say(env, chat, text, menuKb(env));
 const askContact = (env, uid) => sendTo(env, uid, '👋 እንኳን ወደ አማን ቢንጎ በደህና መጡ!\n\nለመመዝገብ ከታች ያለውን «📱 ስልክ ቁጥሬን አጋራ» ቁልፍ ይጫኑ።' + (welcomeC(env) > 0 ? `\n🎁 ሲመዘገቡ ${B(welcomeC(env))} ብር ስጦታ ያገኛሉ!` : ''), SHARE_KB);
-const instructionText = `📖 እንዴት ይጫወታሉ?\n\n1️⃣ «Deposit» ን ተጭነው ገንዘብ ያስገቡ (ቢያንስ ${MIN_DEP} ብር)።\n2️⃣ «Play» ን ተጭነው ጨዋታውን ይክፈቱ።\n3️⃣ ከ1 እስከ ${TOTAL} ካርቴላ ይምረጡ — እስከ ${MAXC} ካርቴላ መያዝ ይቻላል።\n4️⃣ ቁጥሮች ሲጠሩ ካርዱ ላይ ምልክት ይደረጋል። መስመር (ወደጎን፣ ወደታች ወይም ዲያጎናል) የሞላ ካርቴላ ያሸንፋል።\n5️⃣ አሸናፊው ከጠቅላላው ድርሻ ${Math.round(CUT * 100)}% ያገኛል። ጨዋታ ለመጀመር ቢያንስ 2 ተጫዋች ያስፈልጋል።\n6️⃣ ለማውጣት «Withdraw» ን ይጫኑ (ቢያንስ ${MIN_WD} ብር)።\n\nጥያቄ ካለዎት: ${SUPPORT}`;
+const instructionText = `📖 እንዴት ይጫወታሉ?\n\n1️⃣ «ገንዘብ አስገባ» ን ተጭነው ገንዘብ ያስገቡ (ቢያንስ ${MIN_DEP} ብር)።\n2️⃣ «ተጫወት» ን ተጭነው ጨዋታውን ይክፈቱ።\n3️⃣ ከ1 እስከ ${TOTAL} ካርቴላ ይምረጡ — እስከ ${MAXC} ካርቴላ መያዝ ይቻላል።\n4️⃣ ቁጥሮች ሲጠሩ ካርዱ ላይ ምልክት ይደረጋል። መስመር (ወደጎን፣ ወደታች ወይም ዲያጎናል) የሞላ ካርቴላ ያሸንፋል።\n5️⃣ አሸናፊው ከጠቅላላው ድርሻ ${Math.round(CUT * 100)}% ያገኛል። ጨዋታ ለመጀመር ቢያንስ 2 ተጫዋች ያስፈልጋል።\n6️⃣ ለማውጣት «አውጣ» ን ይጫኑ (ቢያንስ ${MIN_WD} ብር)።\n\nጥያቄ ካለዎት: ${SUPPORT}`;
+const KBNOTE = '⌨️ አዲስ! ከታች ያሉትን ቁልፎች (ጨዋታ ተጫወት፣ ገንዘብ አስገባ፣ ቀሪ ሂሳብ) መጠቀም ይችላሉ።';
 
 // banks offered in the deposit / withdraw flows (the CBE button shows only when CBE_ACCOUNT is set)
 const BANKS = { telebirr: 'TELEBIRR', cbe: 'CBE BIRR', boa: 'BOA', dashen: 'DASHEN' };
@@ -136,10 +139,10 @@ const banksFor = env => Object.keys(BANKS).filter(k => k !== 'cbe' || env.CBE_AC
 const bankKb = (env, flow) => {
   const b = banksFor(env).map(k => ({ text: BANKS[k], callback_data: `b:${flow}:${k}` })), rows = [];
   for (let i = 0; i < b.length; i += 2) rows.push(b.slice(i, i + 2));
-  rows.push([{ text: '❌ ሰርዝ (Cancel)', callback_data: 'b:x' }]);
+  rows.push([{ text: '❌ ሰርዝ', callback_data: 'b:x' }]);
   return { inline_keyboard: rows };
 };
-const acctText = (env, k) => k === 'telebirr' ? '📱 Telebirr: 0958828304\n👤 Name: AMANUEL' : k === 'boa' ? '🏦 BOA: 266199511\n👤 Name: AMANUEL YISMAH' : k === 'dashen' ? '🏦 Dashen: 5901914597011\n👤 Name: AMANUEL YISMAH' : '🏦 CBE: ' + (env.CBE_ACCOUNT || '');
+const acctText = (env, k) => k === 'telebirr' ? '📱 ቴሌብር: 0958828304\n👤 ስም: AMANUEL' : k === 'boa' ? '🏦 አቢሲኒያ ባንክ (BOA): 266199511\n👤 ስም: AMANUEL YISMAH' : k === 'dashen' ? '🏦 ዳሽን ባንክ: 5901914597011\n👤 ስም: AMANUEL YISMAH' : '🏦 ንግድ ባንክ (CBE): ' + (env.CBE_ACCOUNT || '');
 
 // where a player is in a multi-step flow (deposit / withdraw / transfer); expires after 30 minutes
 const setState = (env, uid, step, data) => env.DB.prepare('INSERT INTO bot_state(uid,step,data,ts) VALUES(?1,?2,?3,?4) ON CONFLICT(uid) DO UPDATE SET step=?2,data=?3,ts=?4').bind(uid, step, JSON.stringify(data || {}), Date.now()).run();
@@ -161,7 +164,7 @@ async function onContact(env, m) { // the player shared their phone number: regi
   catch (e) { return sendTo(env, uid, `⚠️ ይህ ስልክ ቁጥር በሌላ አካውንት ተመዝግቧል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`, SHARE_KB) }
   if (!ok) { await sendBottom(env, uid, '✅ አስቀድመው ተመዝግበዋል።'); return sendMenu(env, uid, '🎮 ከታች ካሉት አማራጮች ይምረጡ።') }
   await sendBottom(env, uid, '✅ ተመዝግበዋል!' + (welcomeC(env) > 0 ? ` የ ${B(welcomeC(env))} ብር ስጦታ ተሰጥቶዎታል።` : '') + '\n\nለመጫወት ወይም ገንዘብ ለማስገባት ከታች ያሉትን ቁልፎች ይጫኑ።');
-  return sendMenu(env, uid, '🎮 ለመጫወት «Play» ን ይጫኑ።');
+  return sendMenu(env, uid, '🎮 ለመጫወት «ተጫወት» ን ይጫኑ።');
 }
 
 /* ---------- money operations (each is one atomic batch) ---------- */
@@ -198,7 +201,7 @@ async function makeDeposit(env, u, amt, txid, method) {
   const db = env.DB, now = Date.now(); let id;
   try { id = (await db.prepare('INSERT INTO deposits(user_id,txid,amount_c,method,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, txid, C(amt), method, 'pending', now).run()).meta.last_row_id } catch (e) { return { error: 'txid_used' } }
   const ok = await tryMatch(env, txid);
-  if (!ok) await notifyAdmins(env, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid }), [[{ text: '✅ Approve', callback_data: 'da:' + id }, { text: '❌ Reject', callback_data: 'dr:' + id }]]);
+  if (!ok) await notifyAdmins(env, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid }), [[{ text: '✅ አጽድቅ', callback_data: 'da:' + id }, { text: '❌ ውድቅ', callback_data: 'dr:' + id }]]);
   return { status: ok ? 'approved' : 'pending', id };
 }
 // a withdrawal request: balance is taken now and given back if an admin rejects it
@@ -206,7 +209,7 @@ async function makeWithdrawal(env, u, amt, account, method) {
   const db = env.DB, now = Date.now(); method = String(method || 'telebirr').slice(0, 20);
   if (!(await hasDeposit(env, u.id))) return { error: 'deposit_required' }; // bonus-farming guard: deposit once before withdrawing
   let id; try { const r = await db.batch([db.prepare('UPDATE users SET balance=balance-?2 WHERE id=?1').bind(u.id, C(amt)), db.prepare('INSERT INTO withdrawals(user_id,amount_c,method,account,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, C(amt), method, account, 'pending', now)]); id = r[1].meta.last_row_id } catch (e) { return { error: errOf(e) } }
-  await notifyAdmins(env, withdrawText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, account }), [[{ text: '💸 Mark paid', callback_data: 'wp:' + id }, { text: '↩️ Reject', callback_data: 'wr:' + id }]]);
+  await notifyAdmins(env, withdrawText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, account }), [[{ text: '💸 ተከፍሏል', callback_data: 'wp:' + id }, { text: '↩️ ውድቅ', callback_data: 'wr:' + id }]]);
   return { id };
 }
 // player-to-player transfer: both statements test the sender's balance at the same moment, so either both apply or neither does
@@ -488,12 +491,12 @@ async function onPlayerCb(env, q, parts) { // menu / bank / cancel buttons
     const flow = parts[1], bank = parts[2], st = await getState(env, uid);
     if (!BANKS[bank] || (bank === 'cbe' && !env.CBE_ACCOUNT)) return;
     if (flow === 'd') {
-      if (!st || st.step !== 'dep_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «Deposit» ን እንደገና ይጫኑ።');
+      if (!st || st.step !== 'dep_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «ገንዘብ አስገባ» ን እንደገና ይጫኑ።');
       await setState(env, uid, 'dep_paste', { amt: st.amt, method: bank });
-      return sendTo(env, uid, `የሚያጋጥማቹ የክፍያ ችግር:\n${SUPPORT} ላይ ፃፉልን።\n\n1. ከታች ባለው አካውንት ${st.amt} ብር ያስገቡ\n${acctText(env, bank)}\n\n2. የከፈሉበትን አጭር የጽሁፍ መልዕክት(message) copy በማድረግ እዚ ላይ Paste አድርገው ያስገቡና ይላኩት 👇👇👇\n\n⚠️ መልዕክቱን ሙሉ በሙሉ ያለምንም ለውጥ ይላኩ (የግብይት ቁጥሩን ጨምሮ)።`);
+      return sendTo(env, uid, `የሚያጋጥማቹ የክፍያ ችግር:\n${SUPPORT} ላይ ፃፉልን።\n\n1. ከታች ባለው አካውንት ${st.amt} ብር ያስገቡ\n${acctText(env, bank)}\n\n2. የከፈሉበትን አጭር የጽሁፍ መልዕክት (SMS) ኮፒ በማድረግ እዚህ ላይ ፔስት (Paste) አድርገው ያስገቡና ይላኩት 👇👇👇\n\n⚠️ መልዕክቱን ሙሉ በሙሉ ያለምንም ለውጥ ይላኩ (የግብይት ቁጥሩን ጨምሮ)።`);
     }
     if (flow === 'w') {
-      if (!st || st.step !== 'wd_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «Withdraw» ን እንደገና ይጫኑ።');
+      if (!st || st.step !== 'wd_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «አውጣ» ን እንደገና ይጫኑ።');
       await setState(env, uid, 'wd_account', { amt: st.amt, method: bank });
       return sendTo(env, uid, `${BANKS[bank]} — ገንዘቡ የሚላክበትን አካውንት ወይም ስልክ ቁጥር ያስገቡ።`);
     }
@@ -509,7 +512,7 @@ async function onStep(env, u, st, text) { // the player typed something while in
   if (st.step === 'dep_bank') return sendTo(env, uid, '👇 እባክዎ ከታች ካሉት አማራጮች ይምረጡ።', bankKb(env, 'd'));
   if (st.step === 'dep_paste') {
     const pr = parsePaste(t);
-    if (!pr) return sendTo(env, uid, '⚠️ የግብይት ቁጥር አልተገኘም። የከፈሉበትን ሙሉ መልዕክት እንደገና copy አድርገው Paste ያድርጉ።');
+    if (!pr) return sendTo(env, uid, '⚠️ የግብይት ቁጥር አልተገኘም። የከፈሉበትን ሙሉ መልዕክት እንደገና ኮፒ አድርገው ፔስት ያድርጉ።');
     const amt = pr.amount_c ? B(pr.amount_c) : st.amt; // the amount written in the bank SMS is the real money, so it wins over the typed amount
     if (amt < MIN_DEP) return sendTo(env, uid, `⚠️ ማስገባት የሚችሉት ከ ${MIN_DEP} ብር ጀምሮ ነው። በመልዕክቱ ላይ ያለው መጠን ${amt} ብር ነው።`);
     const r = await makeDeposit(env, u, amt, pr.txid, pr.bank || st.method);
@@ -556,15 +559,15 @@ async function onTelegram(env, up) {
   if (up.callback_query) {
     const q = up.callback_query, parts = String(q.data).split(':'), [a, id] = parts;
     if (a === 'm' || a === 'b') return onPlayerCb(env, q, parts);
-    if (!(await isAdmin(env, q.from.id))) return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: 'Admin only' });
+    if (!(await isAdmin(env, q.from.id))) return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: 'ለአስተዳዳሪ ብቻ' });
     const ok = a === 'da' ? await decideDeposit(env, +id, true) : a === 'dr' ? await decideDeposit(env, +id, false) : a === 'wp' ? await decideWithdraw(env, +id, true) : a === 'wr' ? await decideWithdraw(env, +id, false) : false;
-    await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: ok ? 'Done' : 'Already processed' });
-    return tg(env, 'editMessageText', { chat_id: q.message.chat.id, message_id: q.message.message_id, text: q.message.text + (ok ? '\n\n✔ Done' : '\n\n(already processed)') });
+    await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: ok ? 'ተጠናቋል' : 'ቀድሞ ተከናውኗል' });
+    return tg(env, 'editMessageText', { chat_id: q.message.chat.id, message_id: q.message.message_id, text: q.message.text + (ok ? '\n\n✔ ተጠናቋል' : '\n\n(ቀድሞ ተከናውኗል)') });
   }
   const m = up.message; if (!m) return;
   if (m.contact) return onContact(env, m); // player shared their phone number
   if (!m.text) return;
-  const text = m.text.trim(), cmd = text.split(/[\s@]/)[0].toLowerCase(), uid = m.from.id; await refreshBonus(env, uid, Date.now()); const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(uid).first();
+  const text0 = m.text.trim(), text = LEG[text0] || text0, cmd = text.split(/[\s@]/)[0].toLowerCase(), uid = m.from.id; await refreshBonus(env, uid, Date.now()); const u = await db.prepare('SELECT * FROM users WHERE id=?').bind(uid).first(); // an old English keyboard button is read as its Amharic twin
   if (text.startsWith('/') || isBtn(text) || text === 'Admin 🛠') await clearState(env, uid); // a command or menu text always leaves any flow
   if (cmd === '/start' && !(u && u.phone)) { // remember who invited this player
     const mm = text.match(/^\/start(?:@\w+)?\s+ref(\d+)/i);
@@ -576,63 +579,63 @@ async function onTelegram(env, up) {
   }
   if (isOwner(env, uid) && (cmd === '/addadmin' || cmd === '/removeadmin' || cmd === '/admins')) {
     const list = await admins(env), id = (m.text.split(/\s+/)[1] || '').replace(/\D/g, '');
-    if (cmd === '/admins') return say(env, uid, 'Admins:\n' + list.join('\n'));
-    if (!id) return say(env, uid, 'Send it like this: ' + cmd + ' 123456789');
-    if (cmd === '/addadmin') { await db.prepare('INSERT OR IGNORE INTO admins(id,added_ts) VALUES(?,?)').bind(Number(id), Date.now()).run(); await say(env, id, 'You are now an admin. Send /admin to open the dashboard.'); return say(env, uid, '✅ Added admin ' + id) }
-    if (isOwner(env, id)) return say(env, uid, 'Owners can only be changed in Cloudflare.');
-    await db.prepare('DELETE FROM admins WHERE id=?').bind(Number(id)).run(); return say(env, uid, '✅ Removed admin ' + id);
+    if (cmd === '/admins') return say(env, uid, 'አስተዳዳሪዎች፦\n' + list.join('\n'));
+    if (!id) return say(env, uid, 'እንዲህ ይላኩ፦ ' + cmd + ' 123456789');
+    if (cmd === '/addadmin') { await db.prepare('INSERT OR IGNORE INTO admins(id,added_ts) VALUES(?,?)').bind(Number(id), Date.now()).run(); await say(env, id, 'አሁን አስተዳዳሪ ሆነዋል። ዳሽቦርዱን ለመክፈት /admin ይላኩ።'); return say(env, uid, '✅ አስተዳዳሪ ተጨምሯል ' + id) }
+    if (isOwner(env, id)) return say(env, uid, 'ባለቤቶች በCloudflare ብቻ ይቀየራሉ።');
+    await db.prepare('DELETE FROM admins WHERE id=?').bind(Number(id)).run(); return say(env, uid, '✅ አስተዳዳሪ ተወግዷል ' + id);
   }
   if (cmd === '/pending' && await isAdmin(env, uid)) {
     const d = (await db.prepare("SELECT d.*,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending'").all()).results, w = (await db.prepare("SELECT w.*,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status='pending'").all()).results;
-    if (!d.length && !w.length) return say(env, uid, 'Nothing pending ✅');
-    for (const x of d) await say(env, uid, depositText(x), [[{ text: '✅ Approve', callback_data: 'da:' + x.id }, { text: '❌ Reject', callback_data: 'dr:' + x.id }]]);
-    for (const x of w) await say(env, uid, withdrawText(x), [[{ text: '💸 Mark paid', callback_data: 'wp:' + x.id }, { text: '↩️ Reject', callback_data: 'wr:' + x.id }]]);
+    if (!d.length && !w.length) return say(env, uid, 'በመጠባበቅ ላይ ያለ ምንም ጥያቄ የለም ✅');
+    for (const x of d) await say(env, uid, depositText(x), [[{ text: '✅ አጽድቅ', callback_data: 'da:' + x.id }, { text: '❌ ውድቅ', callback_data: 'dr:' + x.id }]]);
+    for (const x of w) await say(env, uid, withdrawText(x), [[{ text: '💸 ተከፍሏል', callback_data: 'wp:' + x.id }, { text: '↩️ ውድቅ', callback_data: 'wr:' + x.id }]]);
     return;
   }
-  if ((cmd === '/admin' || text === 'Admin 🛠') && await isAdmin(env, uid)) return tg(env, 'sendMessage', { chat_id: uid, text: 'Admin dashboard', reply_markup: { inline_keyboard: [[{ text: 'Open admin 🛠', web_app: { url: adminUrl(env) } }]] } });
+  if ((cmd === '/admin' || text === 'Admin 🛠') && await isAdmin(env, uid)) return tg(env, 'sendMessage', { chat_id: uid, text: 'የአስተዳዳሪ ዳሽቦርድ', reply_markup: { inline_keyboard: [[{ text: 'አስተዳዳሪ ክፈት 🛠', web_app: { url: adminUrl(env) } }]] } });
   if (isOwner(env, uid) && (cmd === '/broadcast' || cmd === '/more')) {
     const rd = async k => ((await db.prepare('SELECT v FROM settings WHERE k=?').bind(k).first()) || {}).v || '';
     if (cmd === '/broadcast') {
       const t0 = m.text.replace(/^\/broadcast(@\w+)?\s*/i, '');
-      if (!t0) return say(env, uid, 'Send it like this: /broadcast your message');
+      if (!t0) return say(env, uid, 'እንዲህ ይላኩ፦ /broadcast መልዕክትዎ');
       await setSet(env, 'bc_text', t0); await setSet(env, 'bc_cursor', '0');
     }
     const t = await rd('bc_text'), cur = Number(await rd('bc_cursor') || 0);
-    if (!t) return say(env, uid, 'Start with /broadcast your message');
+    if (!t) return say(env, uid, 'በ /broadcast መልዕክትዎ ይጀምሩ');
     const rows = (await db.prepare("SELECT id FROM users WHERE phone IS NOT NULL AND id>? ORDER BY id LIMIT 40").bind(cur).all()).results;
-    if (!rows.length) return say(env, uid, '✅ Broadcast finished.');
+    if (!rows.length) return say(env, uid, '✅ ማሰራጨት ተጠናቅቋል።');
     await Promise.all(rows.map(r => env.PROMO_PHOTO
       ? tg(env, 'sendPhoto', { chat_id: r.id, photo: env.PROMO_PHOTO, caption: t, reply_markup: { inline_keyboard: playKb(env) } })
       : tg(env, 'sendMessage', { chat_id: r.id, text: t, reply_markup: { inline_keyboard: playKb(env) } })));
     await setSet(env, 'bc_cursor', String(rows[rows.length - 1].id));
-    return say(env, uid, `📤 Sent to ${rows.length} players. Send /more for the next batch.`);
+    return say(env, uid, `📤 ለ${rows.length} ተጫዋቾች ተልኳል። ቀጣዩን ለመላክ /more ይላኩ።`);
   }
   if (isOwner(env, uid) && cmd === '/keyboard') { // pushes the bottom keyboard to every registered player, 40 at a time. Send /keyboard again for the next batch, "/keyboard reset" to start over.
     if (/reset/i.test(m.text)) await setSet(env, 'kb_cursor', '0');
     const cur = Number(((await db.prepare("SELECT v FROM settings WHERE k='kb_cursor'").first()) || {}).v || 0);
     const rows = (await db.prepare('SELECT id FROM users WHERE phone IS NOT NULL AND id>? ORDER BY id LIMIT 40').bind(cur).all()).results;
-    if (!rows.length) return say(env, uid, '✅ Everyone has the keyboard now.');
-    await Promise.all(rows.map(r => sendBottom(env, r.id, '⌨️ አዲስ! ከታች ያሉትን ቁልፎች (Play Games, Deposit, Check Balance) መጠቀም ይችላሉ።')));
+    if (!rows.length) return say(env, uid, '✅ ሁሉም ተጫዋች ቁልፎቹን አግኝቷል።');
+    await Promise.all(rows.map(r => sendBottom(env, r.id, KBNOTE)));
     await setSet(env, 'kb_cursor', String(rows[rows.length - 1].id));
-    return say(env, uid, `⌨️ Keyboard sent to ${rows.length} players. Send /keyboard again for the next batch.`);
+    return say(env, uid, `⌨️ ቁልፎቹ ለ${rows.length} ተጫዋቾች ተልከዋል። ቀጣዩን ለመላክ /keyboard እንደገና ይላኩ።`);
   }
   if (!u || !u.phone) return askContact(env, uid); // new player: must share the phone number first
   if (await isBanned(env, uid)) return sendTo(env, uid, `⛔ አካውንትዎ ታግዷል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`);
   if (cmd === '/start') { await sendBottom(env, uid, '👋 ሰላም!\n\nለመጫወት ወይም ገንዘብ ለማስገባት ከታች ያሉትን ቁልፎች ይጫኑ።'); return sendMenu(env, uid, '🎮 ሌሎች አማራጮች ከታች አሉ።') } // shows the bottom keyboard + the inline menu
-  if (!(await db.prepare('SELECT 1 x FROM kb_sent WHERE uid=?').bind(uid).first())) await sendBottom(env, uid, '⌨️ አዲስ! ከታች ያሉትን ቁልፎች (Play Games, Deposit, Check Balance) መጠቀም ይችላሉ።'); // old players get the bottom keyboard once, on their next message
+  if (!(await db.prepare('SELECT 1 x FROM kb_sent WHERE uid=?').bind(uid).first())) await sendBottom(env, uid, KBNOTE); // old players get the bottom keyboard once, on their next message
   const st = await getState(env, uid); if (st) { const h = await onStep(env, u, st, text); if (h !== null && h !== undefined) return h; if (st.step === 'dep_paste') return } // inside a flow: the step handles the message
   if (text === BTN.play || text === BOT.play || cmd === '/play') return sendTo(env, uid, '🎮 ለመጫወት ከታች ያለውን ቁልፍ ይጫኑ።', { inline_keyboard: playKb(env) });
   if (text === BTN.dep || text === BOT.dep || cmd === '/deposit') return menuAction(env, u, 'dep');
-  if (text === BTN.sup || cmd === '/support') return sendTo(env, uid, `🆘 ለእርዳታ ያነጋግሩን: ${SUPPORT}`, { inline_keyboard: [[{ text: 'Contact Support... 🆘', url: 'https://t.me/' + SUPPORT.slice(1) }]] });
+  if (text === BTN.sup || cmd === '/support') return sendTo(env, uid, `🆘 ለእርዳታ ያነጋግሩን: ${SUPPORT}`, { inline_keyboard: [[{ text: 'እርዳታ 🆘', url: 'https://t.me/' + SUPPORT.slice(1) }]] });
   if (cmd === '/withdraw') return menuAction(env, u, 'wd');
   if (cmd === '/transfer') return menuAction(env, u, 'tr');
   if (cmd === '/invite') return menuAction(env, u, 'inv');
   if (cmd === '/instruction') return menuAction(env, u, 'ins');
   return sendMenu(env, uid, '🎮 እንኳን ደህና መጡ! ከታች ካሉት አማራጮች ይምረጡ።');
 }
-const depositText = x => `💰 Deposit #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr via ${x.method}\nTransaction: ${x.txid}\nNo matching SMS yet — it is credited automatically when the SMS arrives; approve by hand only if the money really arrived.`;
+const depositText = x => `💰 ገቢ #${x.id}\n${x.name} · ${x.phone}\nመጠን: ${B(x.amount_c)} ብር በ ${x.method}\nየግብይት ቁጥር: ${x.txid}\nየሚዛመድ SMS ገና አልደረሰም — SMS ሲደርስ በራስ-ሰር ይጨመራል፤ ገንዘቡ በእርግጥ መድረሱን ካረጋገጡ ብቻ በእጅ ያጽድቁ።`;
 const notifyAdmins = async (env, text, kb) => Promise.all((await admins(env)).map(a => say(env, a, text, kb)));
-const withdrawText = x => `💸 Withdrawal #${x.id}\n${x.name} · ${x.phone}\nAmount: ${B(x.amount_c)} birr\nSend to: ${x.method} ${x.account}`;
+const withdrawText = x => `💸 ወጪ #${x.id}\n${x.name} · ${x.phone}\nመጠን: ${B(x.amount_c)} ብር\nይላክ ወደ: ${x.method} ${x.account}`;
 
 /* ---------- admin dashboard routes (password = ADMIN_KEY secret, or a Telegram admin account) ---------- */
 async function adminRoute(req, env, url) {

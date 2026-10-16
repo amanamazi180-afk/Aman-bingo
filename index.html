@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="am"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><meta http-equiv="Expires" content="0">
 <title>አማን BINGO</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@800;900&display=swap" media="print" onload="this.media='all'">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#0a1224;--cd:#111c36;--ln:#26365e;--or:#f5b73b;--gr:#22c55e;--rd:#ef4444;--tx:#e8eefc;--mu:#93a3c7;--dk:#04150c;--tk:#dc2626;--cl:#dc2626}
+:root{--bg:#0a1224;--cd:#111c36;--ln:#26365e;--or:#f5b73b;--gr:#22c55e;--rd:#ef4444;--tx:#e8eefc;--mu:#93a3c7;--dk:#04150c;--tk:#dc2626;--cl:#7c3aed}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;-webkit-text-size-adjust:100%}
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx);overflow:hidden;touch-action:manipulation}
@@ -56,19 +56,21 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .board{width:52%;background:var(--cd);border:1px solid var(--ln);border-radius:16px;padding:5px;display:grid;grid-template-columns:repeat(5,1fr);gap:3px;grid-auto-rows:1fr}
 .board .hd{border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;color:#fff}
 .nn{display:flex;align-items:center;justify-content:center;border-radius:7px;background:#182650;border:1px solid #33477a;font-weight:700;font-size:15px}
-.nn.k{background:var(--cl);border-color:var(--cl);color:#fff;font-weight:900}.nn.l{background:var(--cl);border-color:var(--or);color:#fff;font-weight:900;box-shadow:0 0 0 2px var(--or)}
+/* CALLED numbers: violet (clearly different from the green cards and the BINGO header colours); the LAST called number is bright gold */
+.nn.k{background:linear-gradient(135deg,#8b5cf6,#6d28d9);border-color:#a78bfa;color:#fff;font-weight:900}
+.nn.l{background:linear-gradient(135deg,#ffe28a,#f5b73b);border-color:#fff7d6;color:#2a1a00;font-weight:900;box-shadow:0 0 0 2px #fff,0 0 12px 3px #f5b73bcc}
 .side{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
 .box{background:var(--cd);border:1px solid var(--ln);border-radius:18px}
 .recent{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;min-height:50px}
 .rec{display:flex;gap:6px;justify-content:center}.rec span{border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;color:#fff}
 .recent .rec span{width:38px;height:38px;font-size:11px}
 .spk{background:none;border:0;font-size:24px;color:var(--tx)}
-/* BIG BALL: larger, glossy, and it ROLLS in from the right every time a new number is called */
+/* BIG BALL: larger, glossy, and it ROLLS in from the right every time a number is called (starts together with the voice) */
 .bigbox{display:flex;align-items:center;justify-content:center;padding:8px 4px;overflow:hidden;position:relative}
 .bigbox:after{content:"";position:absolute;left:18%;right:18%;bottom:5px;height:7px;border-radius:50%;background:radial-gradient(ellipse at center,#0008,#0000 70%);pointer-events:none}
-.bigb{width:clamp(100px,32vw,150px);height:clamp(100px,32vw,150px);flex:none;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff 0,#f4f7ff 38%,#c9d3ea 100%);color:#0a1a3a;border:7px solid var(--or);display:flex;align-items:center;justify-content:center;font-size:clamp(26px,8.5vw,40px);font-weight:900;padding:0;white-space:nowrap;box-shadow:inset -6px -8px 14px #0a1a3a33,0 6px 14px #0006}
+.bigb{width:clamp(100px,32vw,150px);height:clamp(100px,32vw,150px);flex:none;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff 0,#f4f7ff 38%,#c9d3ea 100%);color:#0a1a3a;border:7px solid var(--or);display:flex;align-items:center;justify-content:center;font-size:clamp(26px,8.5vw,40px);font-weight:900;padding:0;white-space:nowrap;box-shadow:inset -6px -8px 14px #0a1a3a33,0 6px 14px #0006;will-change:transform}
 @keyframes rollin{
- 0%{transform:translateX(130%) rotate(900deg);opacity:.2}
+ 0%{transform:translateX(150%) rotate(1080deg);opacity:.2}
  55%{transform:translateX(-10%) rotate(-40deg);opacity:1}
  72%{transform:translateX(5%) rotate(14deg)}
  86%{transform:translateX(-2%) rotate(-5deg)}
@@ -122,7 +124,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 <div class="s" id="splash" style="justify-content:center"><div class="logo">አማን <i>BINGO</i></div><div class="bar"><div></div></div><p class="hint" id="smsg" style="margin-top:10px"></p></div>
 
 <div class="s on" id="home">
-  <div class="hdr"><b>አማን BINGO</b><button class="gb" onclick="alert('1. Pick up to 2 cards (1-400) before the timer ends.\n2. Stake is taken from your wallet.\n3. Numbers are called automatically.\n4. First card to complete a row, column or diagonal wins the Derash.')">Rules</button></div>
+  <div class="hdr"><b>አማን BINGO</b><button class="gb" onclick="alert('1. ሰዓቱ ሳያልቅ እስከ 2 ካርቴላ (ከ1 እስከ 600) ይምረጡ።\n2. ዋጋው ከቦርሳዎ ይቆረጣል።\n3. ቁጥሮች በራስ-ሰር ይጠራሉ።\n4. መስመር፣ ዓምድ ወይም ሰያፍ መጀመሪያ የሞላ ካርቴላ ደራሹን ያሸንፋል።')">ደንቦች</button></div>
   <div class="pbn" id="pbn"><div class="pbt" id="pbt">
     <div class="pbs pb1"><div><span>ፕሮሞሽን</span><b>አማን ቢንጎ — ይጫወቱ፣ ያሸንፉ!</b><small>ትልቅ ሽልማት በየጨዋታው ይጠብቅዎታል</small></div><em>🎯</em></div>
     <div class="pbs pb2"><div><span>ቦነስ</span><b>10 ብር የእንኳን ደህና መጡ ቦነስ</b><small>አዲስ ሲመዘገቡ ወዲያው ያገኛሉ</small></div><em>🎁</em></div>
@@ -131,47 +133,47 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
     <div class="pbs pb5"><div><span>ፈጣን ገቢ</span><b>ፈጣን ተቀማጭ ገንዘብ</b><small>ቴሌብር፣ ሲቢኢ፣ ዳሽን እና አቢሲኒያ</small></div><em>⚡</em></div>
     <div class="pbs pb6"><div><span>ፈጣን ወጪ</span><b>ያሸነፉትን ወዲያው ያውጡ</b><small>ፈጣን እና አስተማማኝ ወጪ</small></div><em>💰</em></div>
   </div><div class="pbd" id="pbd"></div></div>
-  <div class="mid"><div class="logo">አማን <i>BINGO</i></div><div class="bar" style="margin:0 auto"><div></div></div><p>Stake <b id="hs">10</b> birr · pick up to 2 cards</p><p id="hreg" style="color:var(--or);font-weight:700"></p></div>
-  <div class="bot"><div class="wal"><small>WALLET BALANCE</small><b id="hw">…</b></div><button class="play" id="pb" onclick="play()">▶ PLAY</button></div>
+  <div class="mid"><div class="logo">አማን <i>BINGO</i></div><div class="bar" style="margin:0 auto"><div></div></div><p>ዋጋ <b id="hs">10</b> ብር · እስከ 2 ካርቴላ ይምረጡ</p><p id="hreg" style="color:var(--or);font-weight:700"></p></div>
+  <div class="bot"><div class="wal"><small>የቦርሳ ሒሳብ</small><b id="hw">…</b></div><button class="play" id="pb" onclick="play()">▶ ተጫወት</button></div>
 </div>
 
 <div class="s" id="lobby">
   <div class="bnr" id="bnr"></div>
-  <div class="pill t" style="flex:none;padding:10px"><small>DERASH</small><b id="lder" style="font-size:34px">0</b> <small style="display:inline">birr</small></div>
-  <div class="row"><button class="gb" onclick="backHome()">← Back</button><div style="flex:1"></div><button class="gb" onclick="key='';tick()">⟳ Refresh</button></div>
-  <div class="row"><div class="pill"><small>MAIN WALLET</small><b id="lm">0</b></div><div class="pill"><small>PLAY WALLET</small><b id="lp">0</b></div><div class="pill"><small>STAKE</small><b id="ls">10</b></div><div class="pill"><small>PLAYERS</small><b id="lpl">0</b></div><div class="pill t"><b id="lt">-</b></div></div>
-  <p class="hint">Tap numbers to pick your cartela (max 2). <span style="color:#22c55e">Green</span> = yours · <span style="color:#dc2626;font-weight:900">red</span> = taken · <span style="color:#f5b73b;font-weight:900">gold</span> = bonus winner</p>
+  <div class="pill t" style="flex:none;padding:10px"><small>ደራሽ</small><b id="lder" style="font-size:34px">0</b> <small style="display:inline">ብር</small></div>
+  <div class="row"><button class="gb" onclick="backHome()">← ተመለስ</button><div style="flex:1"></div><button class="gb" onclick="key='';tick()">⟳ አድስ</button></div>
+  <div class="row"><div class="pill"><small>ዋና ቦርሳ</small><b id="lm">0</b></div><div class="pill"><small>የጨዋታ ቦርሳ</small><b id="lp">0</b></div><div class="pill"><small>ዋጋ</small><b id="ls">10</b></div><div class="pill"><small>ተጫዋቾች</small><b id="lpl">0</b></div><div class="pill t"><b id="lt">-</b></div></div>
+  <p class="hint">ካርቴላ ለመምረጥ ቁጥር ይንኩ (እስከ 2)። <span style="color:#22c55e">አረንጓዴ</span> = የእርስዎ · <span style="color:#dc2626;font-weight:900">ቀይ</span> = የተያዘ · <span style="color:#f5b73b;font-weight:900">ወርቃማ</span> = የቦነስ አሸናፊ</p>
   <div class="grid" id="grid"></div>
   <div class="prev" id="prev"></div>
 </div>
 
 <div class="s" id="game">
-  <div class="row"><div class="pill"><small>Game ID</small><b id="gid">-</b></div><div class="pill"><small>Players</small><b id="gp">0</b></div><div class="pill"><small>Bet</small><b id="gbet">10</b></div><div class="pill"><small>Derash</small><b id="gd">0</b></div><div class="pill"><small>Called</small><b id="gc">0</b></div></div>
+  <div class="row"><div class="pill"><small>የጨዋታ ቁጥር</small><b id="gid">-</b></div><div class="pill"><small>ተጫዋች</small><b id="gp">0</b></div><div class="pill"><small>ውርርድ</small><b id="gbet">10</b></div><div class="pill"><small>ደራሽ</small><b id="gd">0</b></div><div class="pill"><small>የተጠሩ</small><b id="gc">0</b></div></div>
   <div class="game">
     <div class="board" id="board"></div>
     <div class="side">
       <div class="box recent"><div class="rec" id="rec"></div><button class="spk" id="sb" onclick="snd()">🔊</button></div>
       <div class="box bigbox"><div class="bigb" id="big">—</div></div>
-      <div class="box auto" onclick="toggleAuto()">AUTOMATIC <div class="sw" id="sw"></div></div>
+      <div class="box auto" onclick="toggleAuto()">አውቶማቲክ <div class="sw" id="sw"></div></div>
       <div class="box cardsbox"><div id="mycards"></div></div>
     </div>
   </div>
-  <div class="bar2"><button class="gb red" onclick="leaveGame()">LEAVE</button><button class="gb" onclick="tick()">REFRESH</button><button class="gb" id="act" onclick="claim()" disabled>WATCHING</button></div>
+  <div class="bar2"><button class="gb red" onclick="leaveGame()">ውጣ</button><button class="gb" onclick="tick()">አድስ</button><button class="gb" id="act" onclick="claim()" disabled>እየተመለከቱ ነው</button></div>
 </div>
 
 <div class="s" id="tab"><div id="tabc" style="display:flex;flex-direction:column;gap:8px"></div></div>
-<div class="gnav" id="gnav"><div class="on" onclick="tabTo(0)"><span>🎮</span>GAME</div><div onclick="tabTo(1)"><span>🏆</span>SCORES</div><div onclick="tabTo(2)"><span>🕓</span>HISTORY</div><div onclick="tabTo(3)"><span>💼</span>WALLET</div><div onclick="tabTo(4)"><span>👤</span>PROFILE</div></div>
+<div class="gnav" id="gnav"><div class="on" onclick="tabTo(0)"><span>🎮</span>ጨዋታ</div><div onclick="tabTo(1)"><span>🏆</span>ደረጃ</div><div onclick="tabTo(2)"><span>🕓</span>ታሪክ</div><div onclick="tabTo(3)"><span>💼</span>ቦርሳ</div><div onclick="tabTo(4)"><span>👤</span>መገለጫ</div></div>
 
 <div class="s" id="wal">
-  <div class="row"><button class="gb" onclick="goHome()">← Back</button></div>
-  <div class="li"><span>Withdrawable</span><span id="wb">0</span></div>
-  <div class="li"><span>Bonus (play only)</span><span id="wbn">0</span></div>
-  <div class="row"><button class="gb" style="flex:1;background:var(--gr);color:var(--dk)" onclick="wf('d')">Deposit</button><button class="gb" style="flex:1" onclick="wf('w')">Withdraw</button></div>
+  <div class="row"><button class="gb" onclick="goHome()">← ተመለስ</button></div>
+  <div class="li"><span>የሚወጣ ሒሳብ</span><span id="wb">0</span></div>
+  <div class="li"><span>ቦነስ (ለጨዋታ ብቻ)</span><span id="wbn">0</span></div>
+  <div class="row"><button class="gb" style="flex:1;background:var(--gr);color:var(--dk)" onclick="wf('d')">ገቢ አድርግ</button><button class="gb" style="flex:1" onclick="wf('w')">ወጪ አድርግ</button></div>
   <div id="wform" style="display:flex;flex-direction:column;gap:10px"></div>
   <div id="whist" style="display:flex;flex-direction:column;gap:6px"></div>
 </div>
 
-<div class="ov" id="win"><div style="font-size:54px">👑</div><div class="bgw" id="wb2">BINGO!</div><h1 id="wt" style="font-size:30px;color:var(--or)"></h1><p id="wn" style="margin:8px 0 14px;font-size:18px"></p><div id="wc" style="width:100%;max-width:340px"></div><p class="hint" id="ws" style="margin-top:14px"></p></div>
+<div class="ov" id="win"><div style="font-size:54px">👑</div><div class="bgw" id="wb2">ቢንጎ!</div><h1 id="wt" style="font-size:30px;color:var(--or)"></h1><p id="wn" style="margin:8px 0 14px;font-size:18px"></p><div id="wc" style="width:100%;max-width:340px"></div><p class="hint" id="ws" style="margin-top:14px"></p></div>
 
 <script>
 const API=location.hostname.endsWith("github.io")?"https://aman-bingo.amanamazi180.workers.dev":"";
@@ -180,8 +182,10 @@ const $=i=>document.getElementById(i),CL=["#3b82f6","#06b6d4","#22c55e","#f5b73b
 const L=n=>"BINGO"[Math.floor((n-1)/15)],F=n=>String(+Number(n).toFixed(2));
 const PAY={telebirr:{n:"Telebirr",a:"0958828304",h:"AMANUEL"},cbe:{n:"CBE",a:"0958828304",h:"AMANUEL YISMAH"},boa:{n:"BOA",a:"266199511",h:"AMANUEL YISMAH"},dashen:{n:"Dashen Bank",a:"5901914597011",h:"AMANUEL YISMAH"}};
 const LG={telebirr:["#0a8fd8","T"],boa:["#c9a227","B"],dashen:["#1b4fa3","D"],cbe:["#7b2a7e","C"]};
-const ERR={no_api:"Server address is not set in index.html (API line)",not_registered:"Please register in the bot first (share your contact)",insufficient_balance:"Not enough balance - deposit first",round_closed:"Round already started",max_cards:"You can take only 2 cards",taken:"Card already taken",bad_input:"Check the numbers you entered",txid_used:"This transaction ID was already used",deposit_required:"Make a deposit before withdrawing",withdraw_pending:"You already have a pending withdrawal. Wait until it is approved.",unauthorized:"Open this game from the Telegram bot",server_error:"Server error, try again",banned:"Your account is blocked. Contact support.",paused:"Game is paused for now",locked:"🔒 This round is locked: a taken cartela can't be changed"};
+const ERR={no_api:"የሰርቨር አድራሻ አልተቀመጠም (index.html API መስመር)",not_registered:"እባክዎ መጀመሪያ በቦቱ ይመዝገቡ (ስልክ ቁጥርዎን ያጋሩ)",insufficient_balance:"በቂ ሒሳብ የለዎትም - መጀመሪያ ገቢ ያድርጉ",round_closed:"ዙሩ ጀምሯል",max_cards:"ከ2 ካርቴላ በላይ መያዝ አይችሉም",taken:"ካርቴላው ተይዟል",bad_input:"ያስገቡትን ቁጥሮች ያረጋግጡ",txid_used:"ይህ የግብይት ቁጥር ቀድሞ ጥቅም ላይ ውሏል",deposit_required:"ወጪ ከማድረግዎ በፊት ገቢ ያድርጉ",withdraw_pending:"በመጠባበቅ ላይ ያለ የወጪ ጥያቄ አለዎት። እስኪፈቀድ ይጠብቁ።",unauthorized:"ጨዋታውን ከቴሌግራም ቦት ይክፈቱ",server_error:"የሰርቨር ችግር፣ እንደገና ይሞክሩ",banned:"አካውንትዎ ታግዷል። ድጋፍን ያነጋግሩ።",paused:"ጨዋታው ለጊዜው ቆሟል",locked:"🔒 ይህ ዙር ተቆልፏል፦ የያዙትን ካርቴላ መቀየር አይቻልም"};
 let ready=false,S=null,off=0,inGame=false,looping=false,snd_on=true,lastN=0,rid=0,key="",reg=false,pend=0,gkey="";
+/* SHS = the called numbers that are SHOWN on screen. A number is shown at the exact moment its voice starts, so the screen and the voice are always in sync. */
+let SHS=new Set();const endAt={id:0,t:0};
 function show(id){document.querySelectorAll(".s").forEach(e=>e.classList.remove("on"));$(id).classList.add("on");$("gnav").style.display=id==="game"?"none":"flex";if(id!=="game")stopVoice()}
 function setNav(i){document.querySelectorAll("#gnav div").forEach((d,k)=>d.classList.toggle("on",k===i))}
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -194,10 +198,11 @@ function mk(no){let s=no*7919+13;const r=()=>(s=(s*1664525+1013904223)%429496729
 function winLine(c,cl){const m=(a,b)=>c[a][b]===0||cl.includes(c[a][b]),ls=[];for(let i=0;i<5;i++){ls.push([0,1,2,3,4].map(j=>[j,i]));ls.push([0,1,2,3,4].map(j=>[i,j]))}ls.push([0,1,2,3,4].map(j=>[j,j]));ls.push([0,1,2,3,4].map(j=>[j,4-j]));return ls.find(l=>l.every(([a,b])=>m(a,b)))||null}
 function cardHTML(no,cl,hl,last){const c=mk(no);let h='<div class="card">'+[..."BINGO"].map((l,i)=>`<div class="h" style="background:${CL[i]}">${l}</div>`).join("");for(let r=0;r<5;r++)for(let k=0;k<5;k++){const v=c[k][r],m=v===0||cl.includes(v),w=hl&&hl.some(x=>x[0]===k&&x[1]===r);h+=`<div class="c${w?" w":m?" m":""}${v&&v===last?" l":""}">${v===0?"★":v}</div>`}return h+"</div>"}
 
-/* VOICE v2 - every called number is spoken, in order, once.
-   - each number is queued separately (before, only the last one of a batch was spoken)
-   - sound files are loaded with retry (before, one failed download = that number silent forever)
-   - a number waits for its own file instead of skipping or playing a different one */
+/* VOICE v3 - every called number is spoken, in order, once, and the number appears on screen exactly when its voice starts.
+   - each number is queued separately
+   - sound files are loaded with retry
+   - a number waits for its own file (max 2 s) instead of skipping or playing a different one
+   - reveal(n) is called at the moment the voice starts: the board, the big ball and the recent balls update together with the voice */
 const _a={},_bp={};let _cur=null,_q=[],_playing=false,_vt=0,_src=null,AC=null,_unl=false,wonSnd=0,_tok=0;
 function aud(n){if(!_a[n]){const a=new Audio(n+".m4a");a.preload="auto";a.setAttribute("playsinline","");_a[n]=a}return _a[n]}
 function ac(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}return AC}
@@ -209,35 +214,41 @@ function unlock(){const c=ac();if(!c)return;try{if(c.state!=="running")c.resume(
 ["touchstart","touchend","click"].forEach(e=>document.addEventListener(e,unlock,{passive:true}));
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)unlock()});
 function stopVoice(){_tok++;_q=[];_playing=false;clearTimeout(_vt);if(_src){const s=_src;_src=null;s.onended=null;try{s.stop()}catch(e){}}if(_cur){try{_cur.pause()}catch(e){}_cur=null}}
-function nextVoice(){clearTimeout(_vt);const n=_q.shift();if(n===undefined){_playing=false;return}
+function reveal(n){SHS.add(n);if(inGame&&S&&S.round.status!=="lobby")drawGame()}
+function revealAll(){if(S)S.called.forEach(x=>SHS.add(x))}
+function nextVoice(){clearTimeout(_vt);const n=_q.shift();if(n===undefined){_playing=false;if(inGame&&S&&S.round.status==="ended")drawGame();return}
   _playing=true;const my=++_tok;let done=false;
   const fin=()=>{if(done||my!==_tok)return;done=true;clearTimeout(_vt);_src=null;nextVoice()};
   Promise.race([getBuf(n),new Promise(r=>setTimeout(()=>r(null),2000))]).then(b=>{
     if(my!==_tok)return;const c=AC;
+    reveal(n); /* the number appears NOW, together with its voice */
     if(c&&b){try{if(c.state!=="running")c.resume();const s=c.createBufferSource();s.buffer=b;s.connect(c.destination);_src=s;s.onended=fin;
       _vt=setTimeout(()=>{try{s.stop()}catch(e){}fin()},Math.min(8000,b.duration*1000+800));s.start(0);return}catch(e){_src=null}}
     const a=aud(n);_cur=a;a.onended=a.onerror=fin;_vt=setTimeout(()=>{try{a.pause()}catch(e){}fin()},6000);
     try{a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(fin)}catch(e){fin()}})}
-function playNum(n){if(!snd_on)return;_q.push(n);if(_q.length>4)_q.shift();if(!_playing)nextVoice()}
-function fanfare(){try{if(!AC)return;if(AC.state==="suspended")AC.resume();const t=AC.currentTime;[[523,0],[659,.14],[784,.28],[1047,.42],[784,.62],[1047,.76],[1319,.9]].forEach(([f,d],i)=>{const o=AC.createOscillator(),g=AC.createGain();o.type="triangle";o.frequency.value=f;o.connect(g);g.connect(AC.destination);const a=t+d,e=a+(i===6?.9:.18);g.gain.setValueAtTime(.0001,a);g.gain.exponentialRampToValueAtTime(.35,a+.02);g.gain.exponentialRampToValueAtTime(.0001,e);o.start(a);o.stop(e+.05)})}catch(e){}}
-function winSound(){if(!snd_on)return;stopVoice();getBuf("bingo").then(b=>{const c=AC;if(c&&b){try{if(c.state!=="running")c.resume();const s=c.createBufferSource();s.buffer=b;s.connect(c.destination);s.start(0);return}catch(e){}}fanfare()})}
-function snd(){snd_on=!snd_on;if(!snd_on)stopVoice();$("sb").textContent=snd_on?"🔊":"🔇"}
+function playNum(n){if(!snd_on){reveal(n);return}_q.push(n);if(_q.length>4)reveal(_q.shift());if(!_playing)nextVoice()}
+function fanfare(){try{if(!AC)ac();if(!AC)return;if(AC.state==="suspended")AC.resume();const t=AC.currentTime;[[523,0],[659,.14],[784,.28],[1047,.42],[784,.62],[1047,.76],[1319,.9]].forEach(([f,d],i)=>{const o=AC.createOscillator(),g=AC.createGain();o.type="triangle";o.frequency.value=f;o.connect(g);g.connect(AC.destination);const a=t+d,e=a+(i===6?.9:.18);g.gain.setValueAtTime(.0001,a);g.gain.exponentialRampToValueAtTime(.35,a+.02);g.gain.exponentialRampToValueAtTime(.0001,e);o.start(a);o.stop(e+.05)})}catch(e){}}
+/* BINGO sound: plays on EVERY win for EVERY player (even if the number voice is muted). Order of tries: decoded file, normal audio file, built-in fanfare. */
+function winSound(){stopVoice();ac();unlock();
+  const alt=()=>{try{const a=aud("bingo");a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(fanfare)}catch(e){fanfare()}};
+  getBuf("bingo").then(b=>{const c=AC;if(c&&b){try{if(c.state!=="running")c.resume();const s=c.createBufferSource();s.buffer=b;s.connect(c.destination);s.start(0);return}catch(e){}}alt()}).catch(alt)}
+function snd(){snd_on=!snd_on;if(!snd_on){stopVoice();revealAll();if(inGame&&S&&S.round.status!=="lobby")drawGame()}$("sb").textContent=snd_on?"🔊":"🔇"}
 
 /* flow */
 function fail(e){
   const h=$("hreg");
   if(e==="unauthorized"){
-    h.innerHTML=(initData()?"⚠️ The server could not verify your Telegram login. Check that the BOT_TOKEN secret in Cloudflare is the token of @Amanbingo2bot.":"⚠️ Close this window and open the game with the bot's Play button.")+`<br><button class="gb" style="margin-top:10px" onclick="tg?tg.close():location.href='https://t.me/Amanbingo2bot'">Close</button>`
-  }else h.innerHTML=(ERR[e]||"Could not connect. Check your internet and try again.")+`<br><button class="gb" style="margin-top:10px" onclick="boot()">⟳ Try again</button>`
+    h.innerHTML=(initData()?"⚠️ ሰርቨሩ የቴሌግራም መግቢያዎን ማረጋገጥ አልቻለም። በCloudflare ያለው BOT_TOKEN የ@Amanbingo2bot ቶክን መሆኑን ያረጋግጡ።":"⚠️ ይህን መስኮት ዘግተው ጨዋታውን በቦቱ የ«ተጫወት» ቁልፍ ይክፈቱ።")+`<br><button class="gb" style="margin-top:10px" onclick="tg?tg.close():location.href='https://t.me/Amanbingo2bot'">ዝጋ</button>`
+  }else h.innerHTML=(ERR[e]||"መገናኘት አልተቻለም። ኢንተርኔትዎን ያረጋግጡ እና እንደገና ይሞክሩ።")+`<br><button class="gb" style="margin-top:10px" onclick="boot()">⟳ እንደገና ሞክር</button>`
 }
 async function boot(){
-  if(API.indexOf("PASTE_")===0){$("hreg").textContent="Setup needed: put your Worker URL in index.html (API line).";return}
+  if(API.indexOf("PASTE_")===0){$("hreg").textContent="ማስተካከያ ያስፈልጋል፦ የWorker አድራሻዎን በindex.html (API መስመር) ያስገቡ።";return}
   for(let a=0;a<5;a++){
     try{const [me,st]=await Promise.all([api("/api/me"),api("/api/state")]);reg=me.registered;S=st;off=st.now-Date.now();ready=true;goHome(me);return}
     catch(e){
       if(e==="unauthorized"&&a===0){await new Promise(r=>setTimeout(r,900));continue}
       if(typeof e==="string"&&e!=="server_error"){fail(e);return}
-      $("hreg").textContent="Reconnecting… ("+(a+1)+"/5)";
+      $("hreg").textContent="እንደገና በመገናኘት ላይ… ("+(a+1)+"/5)";
       await new Promise(r=>setTimeout(r,1500*(a+1)));
     }
   }
@@ -246,7 +257,7 @@ async function boot(){
 async function goHome(me){
   inGame=false;show("home");setNav(0);
   try{me=me||await api("/api/me");reg=me.registered;$("hw").textContent=F(me.balance+me.bonus)}catch(e){}
-  $("hreg").textContent=reg?"":"Register first: open the bot and share your contact";$("pb").style.opacity=reg?1:.5;
+  $("hreg").textContent=reg?"":"መጀመሪያ ይመዝገቡ፦ ቦቱን ከፍተው ስልክ ቁጥርዎን ያጋሩ";$("pb").style.opacity=reg?1:.5;
   if(S)$("hs").textContent=S.round.stake;
 }
 function play(){
@@ -270,7 +281,7 @@ async function tick(){
 }
 function render(){
   const r=S.round;
-  if(r.id!==rid){rid=r.id;lastN=S.called.length;key="";gkey=""}
+  if(r.id!==rid){rid=r.id;lastN=S.called.length;key="";gkey="";stopVoice();SHS=new Set(S.called);window._bk=null} /* numbers already called when you open the round are shown at once (silent); new ones are shown with their voice */
   if(r.status==="lobby"){$("win").classList.remove("on");show("lobby");drawLobby()}
   else{show("game");drawGame()}
 }
@@ -284,12 +295,12 @@ function drawLobby(){
   const bi=bonusInfo(),bw=bi.wins||[];
   const k=JSON.stringify([S.taken,S.mine,bw]);if(k===key)return;key=k;
   const bnr=$("bnr");
-  if(bw.length){bnr.innerHTML=bw.map(w=>"🎉 Congratulations "+esc(w.name)+"! Won "+F(w.amount)+" birr bonus · Cartela #"+w.cartela).join("<br>");bnr.style.display="block"}
+  if(bw.length){bnr.innerHTML=bw.map(w=>"🎉 እንኳን ደስ አለዎት "+esc(w.name)+"! "+F(w.amount)+" ብር ቦነስ አሸንፈዋል · ካርቴላ #"+w.cartela).join("<br>");bnr.style.display="block"}
   else{bnr.innerHTML="";bnr.style.display="none"}
   const gold=new Set(bw.map(w=>w.cartela));
-  let h="";for(let i=1;i<=400;i++)h+=`<div class="n${gold.has(i)?" bn":S.mine.includes(i)?" mine":S.taken.includes(i)?" tk":""}" onclick="pick(${i})">${i}</div>`;
+  let h="";for(let i=1;i<=600;i++)h+=`<div class="n${gold.has(i)?" bn":S.mine.includes(i)?" mine":S.taken.includes(i)?" tk":""}" onclick="pick(${i})">${i}</div>`;
   const g=$("grid"),sc=g.scrollTop;g.innerHTML=h;g.scrollTop=sc;
-  $("prev").innerHTML=S.mine.map(n=>`<div><div class="cn">CARTELA #${n}</div>${cardHTML(n,[])}</div>`).join("");
+  $("prev").innerHTML=S.mine.map(n=>`<div><div class="cn">ካርቴላ #${n}</div>${cardHTML(n,[])}</div>`).join("");
 }
 async function pick(n){
   if(S.taken.includes(n)&&!S.mine.includes(n))return;
@@ -301,7 +312,7 @@ async function pick(n){
   else{S.mine.push(n);S.taken.push(n)}
   key="";drawLobby();pend++;
   try{const s=await api(had?"/api/unpick":"/api/pick",{cartela:n});
-    if(s.bonus_won)toast("🎉 Congratulations! You won "+F(s.bonus_won)+" birr bonus!",1);
+    if(s.bonus_won)toast("🎉 እንኳን ደስ አለዎት! "+F(s.bonus_won)+" ብር ቦነስ አሸንፈዋል!",1);
     if(pend===1){S=s;key="";render()}
     if(tg&&tg.HapticFeedback)tg.HapticFeedback.selectionChanged()}
   catch(e){if(pend===1){S.mine=bk[0];S.taken=bk[1];key="";drawLobby()}toast(ERR[e]||e)}
@@ -309,82 +320,89 @@ async function pick(n){
 }
 function buildBoard(){let h="";[..."BINGO"].forEach((l,i)=>h+=`<div class="hd" style="background:${CL[i]}">${l}</div>`);for(let r=1;r<=15;r++)for(let c=0;c<5;c++){const n=c*15+r;h+=`<div class="nn" id="b${n}">${n}</div>`}$("board").innerHTML=h}
 function drawGame(){
-  const r=S.round,cl=S.called,n=cl[cl.length-1];
-  $("gid").textContent=r.id;$("gp").textContent=(S.taken&&S.taken.length)?S.taken.length:S.players;$("gbet").textContent=r.stake;$("gd").textContent=F(S.derash);$("gc").textContent=cl.length;
-  /* speak EVERY newly called number in order (max last 3 if the phone was asleep, so voice stays in sync with the screen) */
-  if(cl.length>lastN){const f=r.status==="running"?Math.max(lastN,cl.length-3):cl.length;for(let i=f;i<cl.length;i++)playNum(cl[i]);lastN=cl.length}
+  const r=S.round,all=S.called;
+  $("gid").textContent=r.id;$("gp").textContent=(S.taken&&S.taken.length)?S.taken.length:S.players;$("gbet").textContent=r.stake;$("gd").textContent=F(S.derash);
+  /* NEW numbers: the last 3 are spoken in order and each one is SHOWN when its voice starts; older ones (phone was asleep) are shown silently at once */
+  if(all.length>lastN){const run=r.status==="running",f=Math.max(lastN,all.length-3);for(let i=lastN;i<all.length;i++){if(run&&snd_on&&i>=f)playNum(all[i]);else SHS.add(all[i])}lastN=all.length}
+  const cl=all.filter(x=>SHS.has(x)),n=cl[cl.length-1];
+  $("gc").textContent=cl.length;
   const gk=r.id+"|"+cl.length+"|"+S.mine.join(",");
-  if(gk!==gkey){gkey=gk; /* the board and cards are rebuilt only when a number is called or the cartelas change */
+  if(gk!==gkey){gkey=gk; /* the board and cards are rebuilt only when a number is shown or the cartelas change */
     for(let i=1;i<=75;i++)$("b"+i).className="nn"+(i===n?" l":cl.includes(i)?" k":"");
     $("big").textContent=n?L(n)+"-"+n:"—";
-    /* BIG BALL: ring takes the colour of the BINGO letter, and the ball ROLLS in each time a new number is called */
+    /* BIG BALL: ring takes the colour of the BINGO letter, and the ball ROLLS in each time a new number appears (same moment as the voice) */
     const bg=$("big");bg.style.borderColor=n?CL[Math.floor((n-1)/15)]:"";
     const bk=r.id+"|"+cl.length;if(n&&bk!==window._bk){window._bk=bk;bg.classList.remove("new");void bg.offsetWidth;bg.classList.add("new")}
     $("rec").innerHTML=cl.slice(-3).reverse().map(x=>`<span style="background:${CL[Math.floor((x-1)/15)]}">${L(x)}-${x}</span>`).join("");
-    $("mycards").innerHTML=S.mine.length?S.mine.map(c=>`<div class="mc"><div class="cn">CARTELA #${c}</div>${cardHTML(c,cl,null,n)}</div>`).join(""):'<div style="text-align:center;padding:26px 6px"><b style="font-size:20px">WATCHING<br>ONLY</b><p class="hint" style="margin-top:10px">The next round starts soon. Wait here.</p></div>'}
+    $("mycards").innerHTML=S.mine.length?S.mine.map(c=>`<div class="mc"><div class="cn">ካርቴላ #${c}</div>${cardHTML(c,cl,null,n)}</div>`).join(""):'<div style="text-align:center;padding:26px 6px"><b style="font-size:20px">እየተመለከቱ<br>ነው</b><p class="hint" style="margin-top:10px">ቀጣዩ ዙር በቅርቡ ይጀምራል። እዚህ ይጠብቁ።</p></div>'}
   const ab=$("act");$("sw").className="sw"+(S.auto?"":" off");
-  if(!S.mine.length){ab.textContent="WATCHING";ab.disabled=true;ab.style.cssText="opacity:.5"}
-  else if(S.auto){ab.textContent="AUTOMATIC";ab.disabled=true;ab.style.cssText="background:var(--gr);color:var(--dk);border-color:var(--gr)"}
-  else{ab.textContent="BINGO";ab.disabled=false;ab.style.cssText="background:#dc2626;color:#fff;border:2px solid #f5b73b"}
+  if(!S.mine.length){ab.textContent="እየተመለከቱ ነው";ab.disabled=true;ab.style.cssText="opacity:.5"}
+  else if(S.auto){ab.textContent="አውቶማቲክ";ab.disabled=true;ab.style.cssText="background:var(--gr);color:var(--dk);border-color:var(--gr)"}
+  else{ab.textContent="ቢንጎ";ab.disabled=false;ab.style.cssText="background:#dc2626;color:#fff;border:2px solid #f5b73b"}
   const ov=$("win");
   if(r.status==="ended"||r.status==="cancelled"){
-    const sec=Math.max(0,Math.ceil((r.rest_ms-(Date.now()+off-r.ended_ts))/1000));ov.classList.add("on");
+    if(r.status==="ended"){
+      /* wait until the last called number has been shown AND spoken, then show the winner + play the BINGO sound (max 8 s wait) */
+      if(endAt.id!==r.id){endAt.id=r.id;endAt.t=Date.now()}
+      if((_playing||_q.length)&&Date.now()-endAt.t<8000)return;
+      revealAll()}
+    const cl2=all,sec=Math.max(0,Math.ceil((r.rest_ms-(Date.now()+off-r.ended_ts))/1000));ov.classList.add("on");
     if(r.status==="ended"){const w=S.winners,me=w.some(x=>S.mine.includes(x.cartela));
-      if(wonSnd!==r.id){wonSnd=r.id;winSound()} /* BINGO voice on EVERY win, for every player */
-      $("wb2").style.display="block";$("wt").textContent=me?"🎉 YOU WON!":"🏆 WINNER";$("wn").textContent=w.map(x=>x.name).join(", ")+" won "+F(S.derash/w.length)+" birr";
-      $("wc").innerHTML=w.length?`<div class="cn">CARTELA #${w[0].cartela}</div>`+cardHTML(w[0].cartela,cl,winLine(mk(w[0].cartela),cl)):""}
-    else{$("wb2").style.display="none";$("wt").textContent="Round cancelled";$("wn").textContent="Not enough players. Your stake was refunded.";$("wc").innerHTML=""}
-    $("ws").textContent="Next round in "+sec+"s"}
+      if(wonSnd!==r.id){wonSnd=r.id;winSound()} /* BINGO sound on EVERY win, for every player */
+      $("wb2").style.display="block";$("wt").textContent=me?"🎉 አሸንፈዋል!":"🏆 አሸናፊ";$("wn").textContent=w.map(x=>x.name).join(", ")+" አሸንፈዋል፦ "+F(S.derash/w.length)+" ብር";
+      $("wc").innerHTML=w.length?`<div class="cn">ካርቴላ #${w[0].cartela}</div>`+cardHTML(w[0].cartela,cl2,winLine(mk(w[0].cartela),cl2)):""}
+    else{$("wb2").style.display="none";$("wt").textContent="ዙሩ ተሰርዟል";$("wn").textContent="በቂ ተጫዋች የለም። ዋጋዎ ተመልሷል።";$("wc").innerHTML=""}
+    $("ws").textContent="ቀጣይ ዙር በ"+sec+" ሰከንድ"}
   else ov.classList.remove("on");
 }
 async function backHome(){
   inGame=false;
-  if(bonusInfo().locked){toast("🔒 Your cartela stays locked for this round")} /* bonus round: cartelas cannot be released */
+  if(bonusInfo().locked){toast("🔒 ካርቴላዎ ለዚህ ዙር እንደተቆለፈ ይቆያል")} /* bonus round: cartelas cannot be released */
   else for(const n of S.mine.slice()){try{await api("/api/unpick",{cartela:n})}catch(e){}}
   goHome()}
 function leaveGame(){inGame=false;$("win").classList.remove("on");goHome()}
 
 /* wallet */
-const SL=x=>({pending:"Pending",paid:"Approved",approved:"Approved",rejected:"Rejected"}[x]||x),SC=x=>x==="paid"||x==="approved"?"#22c55e":x==="rejected"?"#ef4444":"#f5b73b";
-const hrows=me=>[...me.deposits.filter(x=>x.status==="approved").map(x=>["Deposit",x]),...me.withdrawals.map(x=>["Withdraw",x])].map(([t,x])=>t==="Deposit"?`<div class="li"><span>Deposit ${F(x.amount)}</span><span></span></div>`:`<div class="li"><span>Withdraw ${F(x.amount)}</span><span style="color:${SC(x.status)}">${SL(x.status)}</span></div>`).join("");
+const SL=x=>({pending:"በመጠባበቅ ላይ",paid:"ተፈቅዷል",approved:"ተፈቅዷል",rejected:"ውድቅ ተደርጓል"}[x]||x),SC=x=>x==="paid"||x==="approved"?"#22c55e":x==="rejected"?"#ef4444":"#f5b73b";
+const hrows=me=>[...me.deposits.filter(x=>x.status==="approved").map(x=>["Deposit",x]),...me.withdrawals.map(x=>["Withdraw",x])].map(([t,x])=>t==="Deposit"?`<div class="li"><span>ገቢ ${F(x.amount)}</span><span></span></div>`:`<div class="li"><span>ወጪ ${F(x.amount)}</span><span style="color:${SC(x.status)}">${SL(x.status)}</span></div>`).join("");
 let sel="telebirr",wsel="telebirr",pendW=false;const WM={telebirr:"Telebirr",boa:"BOA",dashen:"Dashen Bank",cbe:"CBE"};
 /* bank logos: put logo-telebirr.jpg, logo-cbe.jpg, logo-boa.jpg, logo-dashen.jpg next to index.html; until then a coloured letter is shown */
 const lg=k=>`<img class="lg" src="logo-${k}.jpg" alt="" onerror="this.outerHTML='<i class=&quot;lg&quot; style=&quot;background:${LG[k][0]}&quot;>${LG[k][1]}</i>'">`;
 function wmSel(k){wsel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="wm_"+k))}
 function pmSel(k){sel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="pm_"+k))}
 function wf(t){
-  if(t==="w"&&pendW){$("wform").innerHTML='<div class="watch">⏳ You have a pending withdrawal.<br>Wait until it is approved before requesting another.</div>';return}
-  $("wform").innerHTML=t==="d"?Object.keys(PAY).map(k=>`<div class="mth" id="pm_${k}" onclick="pmSel('${k}')">${lg(k)}<div><b>${PAY[k].n}</b><span onclick="cp('${PAY[k].a}',event)">${PAY[k].a} 📋</span><small>${PAY[k].h}</small></div></div>`).join("")+`<input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="Amount (min 30 birr)"><input class="inp" id="fa2" placeholder="Transaction ID"><button class="gb" style="background:var(--gr);color:var(--dk)" onclick="dep()">Submit deposit</button>`
- :Object.keys(WM).map(k=>`<div class="mth" id="wm_${k}" onclick="wmSel('${k}')">${lg(k)}<div><b>${WM[k]}</b><small>Receive here</small></div></div>`).join("")+`<input class="inp" id="fa2" placeholder="Your account number / phone"><input class="inp" id="fa3" placeholder="Account holder name"><input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="Amount (min 50 birr)"><button class="gb" onclick="wd()">Request withdrawal</button>`;
+  if(t==="w"&&pendW){$("wform").innerHTML='<div class="watch">⏳ በመጠባበቅ ላይ ያለ የወጪ ጥያቄ አለዎት።<br>ሌላ ከመጠየቅዎ በፊት እስኪፈቀድ ይጠብቁ።</div>';return}
+  $("wform").innerHTML=t==="d"?Object.keys(PAY).map(k=>`<div class="mth" id="pm_${k}" onclick="pmSel('${k}')">${lg(k)}<div><b>${PAY[k].n}</b><span onclick="cp('${PAY[k].a}',event)">${PAY[k].a} 📋</span><small>${PAY[k].h}</small></div></div>`).join("")+`<input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="መጠን (ቢያንስ 30 ብር)"><input class="inp" id="fa2" placeholder="የግብይት ቁጥር"><button class="gb" style="background:var(--gr);color:var(--dk)" onclick="dep()">ገቢውን አስገባ</button>`
+ :Object.keys(WM).map(k=>`<div class="mth" id="wm_${k}" onclick="wmSel('${k}')">${lg(k)}<div><b>${WM[k]}</b><small>እዚህ ይቀበሉ</small></div></div>`).join("")+`<input class="inp" id="fa2" placeholder="የሂሳብ ቁጥርዎ / ስልክ"><input class="inp" id="fa3" placeholder="የሂሳብ ባለቤት ስም"><input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="መጠን (ቢያንስ 50 ብር)"><button class="gb" onclick="wd()">ወጪ ጠይቅ</button>`;
   if(t==="d")pmSel(sel);else wmSel(wsel)}
 async function openWallet(){show("wal");setNav(3);$("wform").innerHTML="";try{const me=await api("/api/me");$("wb").textContent=F(me.balance);$("wbn").textContent=F(me.bonus);pendW=me.withdrawals.some(x=>x.status==="pending");
   $("whist").innerHTML=hrows(me)}catch(e){toast(ERR[e]||e)}}
-async function dep(){try{const d=await api("/api/deposit",{amount:$("fa1").value,txid:$("fa2").value,method:sel});toast(d.status==="approved"?"✅ Deposit received":"✅ Deposit submitted. Your balance updates as soon as it is confirmed.");openWallet()}catch(e){toast(ERR[e]||e)}}
-async function wd(){try{await api("/api/withdraw",{amount:$("fa1").value,account:$("fa2").value,name:$("fa3").value,method:wsel});toast("✅ Withdrawal requested - Pending");openWallet()}catch(e){toast(ERR[e]||e)}}
+async function dep(){try{const d=await api("/api/deposit",{amount:$("fa1").value,txid:$("fa2").value,method:sel});toast(d.status==="approved"?"✅ ገቢው ደርሷል":"✅ ገቢው ተልኳል። ልክ እንደተረጋገጠ ሒሳብዎ ይታደሳል።");openWallet()}catch(e){toast(ERR[e]||e)}}
+async function wd(){try{await api("/api/withdraw",{amount:$("fa1").value,account:$("fa2").value,name:$("fa3").value,method:wsel});toast("✅ የወጪ ጥያቄ ተልኳል - በመጠባበቅ ላይ");openWallet()}catch(e){toast(ERR[e]||e)}}
 function tabTo(i){inGame=false;$("win").classList.remove("on");setNav(i);if(i===0){goHome();return}if(i===3){openWallet();return}show("tab");$("tabc").innerHTML='<p class="hint">…</p>';if(i===1)scoresPage("weekly");else if(i===2)histPage();else profPage()}
-const pz=x=>x>0?F(x)+" birr":"";
-function wkLeft(ts){const l=Math.max(0,ts-(Date.now()+off)),d=Math.floor(l/864e5),h=Math.floor(l%864e5/36e5);return d+"d "+h+"h"}
+const pz=x=>x>0?F(x)+" ብር":"";
+function wkLeft(ts){const l=Math.max(0,ts-(Date.now()+off)),d=Math.floor(l/864e5),h=Math.floor(l%864e5/36e5);return d+" ቀን "+h+" ሰዓት"}
 function wkHTML(d){
   const top=d.top||[],me=d.me||{},md=["🥇","🥈","🥉"];
   let h='<div class="wk">';
   if(d.won)h+=`<div class="cg">🎉 እንኳን ደስ አለዎት!<br>የሳምንቱ ከፍተኛ ተጫዋች ራንክ አሸናፊ ሆነዋል<br><span style="color:var(--or)">#${d.won.rank} · ${d.won.games} ጨዋታ${d.won.prize>0?" · "+F(d.won.prize)+" ብር":""}</span></div>`;
-  h+=`<div class="me"><b>My rank</b>: ${me.rank?"#"+me.rank:"not ranked yet"} · ${me.played||0} games${me.prize>0?" · prize "+pz(me.prize):""}<small>Week ends in ${wkLeft(d.ends_ts)} · the more games you play, the higher you rank</small></div>`;
-  if(!top.length)h+='<p class="hint" style="padding:18px 0">Nobody has played this week yet. Be the first!</p>';
-  const pc=(x,c)=>x?`<div class="pc ${c}"><div class="md">${md[x.rank-1]}</div><div class="nm">${esc(x.name)}</div><div class="ph">${esc(x.phone)}</div><div class="gm">${x.games} games</div>${x.prize>0?`<div class="pr">${pz(x.prize)}</div>`:""}</div>`:"";
+  h+=`<div class="me"><b>የእኔ ደረጃ</b>፦ ${me.rank?"#"+me.rank:"ገና ደረጃ አልያዙም"} · ${me.played||0} ጨዋታ${me.prize>0?" · ሽልማት "+pz(me.prize):""}<small>ሳምንቱ የሚያልቀው በ${wkLeft(d.ends_ts)} · ብዙ በተጫወቱ ቁጥር ደረጃዎ ከፍ ይላል</small></div>`;
+  if(!top.length)h+='<p class="hint" style="padding:18px 0">በዚህ ሳምንት ማንም አልተጫወተም። የመጀመሪያው ይሁኑ!</p>';
+  const pc=(x,c)=>x?`<div class="pc ${c}"><div class="md">${md[x.rank-1]}</div><div class="nm">${esc(x.name)}</div><div class="ph">${esc(x.phone)}</div><div class="gm">${x.games} ጨዋታ</div>${x.prize>0?`<div class="pr">${pz(x.prize)}</div>`:""}</div>`:"";
   if(top.length)h+=`<div class="pod">${pc(top[1],"p2")}${pc(top[0],"p1")}${pc(top[2],"p3")}</div>`;
-  if(top.length>3)h+='<h3>4 — '+(top.length>=10?"10":top.length)+'</h3>'+top.slice(3).map(x=>`<div class="rk"><div class="no">${x.rank}</div><div class="in"><b>${esc(x.name)}</b><small>${esc(x.phone)}</small></div><div class="rt">${x.games} games${x.prize>0?`<b>${pz(x.prize)}</b>`:""}</div></div>`).join("");
+  if(top.length>3)h+='<h3>4 — '+(top.length>=10?"10":top.length)+'</h3>'+top.slice(3).map(x=>`<div class="rk"><div class="no">${x.rank}</div><div class="in"><b>${esc(x.name)}</b><small>${esc(x.phone)}</small></div><div class="rt">${x.games} ጨዋታ${x.prize>0?`<b>${pz(x.prize)}</b>`:""}</div></div>`).join("");
   const lw=d.last&&d.last.winners||[];
-  if(lw.length)h+='<h3>LAST WEEK\'S WINNERS</h3>'+lw.map(x=>`<div class="rk"><div class="no">${x.rank}</div><div class="in"><b>${esc(x.name)}</b><small>${x.games} games</small></div><div class="rt"><b>${pz(x.prize)}</b></div></div>`).join("");
+  if(lw.length)h+='<h3>ያለፈው ሳምንት አሸናፊዎች</h3>'+lw.map(x=>`<div class="rk"><div class="no">${x.rank}</div><div class="in"><b>${esc(x.name)}</b><small>${x.games} ጨዋታ</small></div><div class="rt"><b>${pz(x.prize)}</b></div></div>`).join("");
   return h+"</div>"}
 async function scoresPage(p){try{const d=await api("/api/leaderboard?period="+p),me=d.me||{},on=";background:var(--gr);color:var(--dk)";
-  const tabs=`<div class="row"><button class="gb" style="flex:1${p==="weekly"?on:""}" onclick="scoresPage('weekly')">WEEKLY</button><button class="gb" style="flex:1${p==="daily"?on:""}" onclick="scoresPage('daily')">DAILY</button></div>`;
+  const tabs=`<div class="row"><button class="gb" style="flex:1${p==="weekly"?on:""}" onclick="scoresPage('weekly')">ሳምንታዊ</button><button class="gb" style="flex:1${p==="daily"?on:""}" onclick="scoresPage('daily')">ዕለታዊ</button></div>`;
   if(d.now)off=d.now-Date.now();
-  $("tabc").innerHTML=tabs+(p==="weekly"?wkHTML(d):`<div class="li"><span>My rank</span><span>${me.rank?"#"+me.rank:"—"} · ${me.played||0} games</span></div><p class="hint">TOP 10 PLAYERS TODAY</p>`+(d.top||[]).map((r,i)=>`<div class="li"><span>${i+1}. ${esc(r[0])}</span><span>${r[1]} games</span></div>`).join(""))}catch(e){toast(ERR[e]||e)}}
-async function histPage(){try{const me=await api("/api/me"),h=hrows(me);$("tabc").innerHTML=h||'<p class="hint">No history yet.</p>'}catch(e){toast(ERR[e]||e)}}
-async function profPage(){try{const me=await api("/api/me");$("tabc").innerHTML=`<div class="li"><span>Name</span><span>${esc(me.name)}</span></div><div class="li"><span>Telegram ID</span><span>${me.id}</span></div><div class="li"><span>Phone</span><span>${esc(me.phone||"-")}</span></div>`}catch(e){toast(ERR[e]||e)}}
+  $("tabc").innerHTML=tabs+(p==="weekly"?wkHTML(d):`<div class="li"><span>የእኔ ደረጃ</span><span>${me.rank?"#"+me.rank:"—"} · ${me.played||0} ጨዋታ</span></div><p class="hint">የዛሬ ምርጥ 10 ተጫዋቾች</p>`+(d.top||[]).map((r,i)=>`<div class="li"><span>${i+1}. ${esc(r[0])}</span><span>${r[1]} ጨዋታ</span></div>`).join(""))}catch(e){toast(ERR[e]||e)}}
+async function histPage(){try{const me=await api("/api/me"),h=hrows(me);$("tabc").innerHTML=h||'<p class="hint">እስካሁን ታሪክ የለም።</p>'}catch(e){toast(ERR[e]||e)}}
+async function profPage(){try{const me=await api("/api/me");$("tabc").innerHTML=`<div class="li"><span>ስም</span><span>${esc(me.name)}</span></div><div class="li"><span>የቴሌግራም መታወቂያ</span><span>${me.id}</span></div><div class="li"><span>ስልክ</span><span>${esc(me.phone||"-")}</span></div>`}catch(e){toast(ERR[e]||e)}}
 async function toggleAuto(){const a=!S.auto;S.auto=a;drawGame();try{await api("/api/auto",{auto:a})}catch(e){S.auto=!a;drawGame();toast(ERR[e]||e)}}
-async function claim(){try{S=await api("/api/bingo",{});off=S.now-Date.now();render()}catch(e){toast(e==="no_bingo"?"❌ No bingo yet":e==="round_over"?"Round already finished":(ERR[e]||e))}}
-function cp(t,e){if(e)e.stopPropagation();const ok=()=>toast("✅ Copied "+t);function fb(){const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();try{document.execCommand("copy");ok()}catch(x){}a.remove()}try{navigator.clipboard.writeText(t).then(ok,fb)}catch(x){fb()}}
+async function claim(){try{S=await api("/api/bingo",{});off=S.now-Date.now();render()}catch(e){toast(e==="no_bingo"?"❌ ገና ቢንጎ የለም":e==="round_over"?"ዙሩ ቀድሞ አብቅቷል":(ERR[e]||e))}}
+function cp(t,e){if(e)e.stopPropagation();const ok=()=>toast("✅ ተቀድቷል "+t);function fb(){const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();try{document.execCommand("copy");ok()}catch(x){}a.remove()}try{navigator.clipboard.writeText(t).then(ok,fb)}catch(x){fb()}}
 
 /* promo banner slider */
 (function(){const tr=$("pbt"),dt=$("pbd"),bn=$("pbn");if(!tr)return;const n=tr.children.length;let i=0,sx=null,t;
@@ -396,7 +414,7 @@ bn.addEventListener("touchend",e=>{if(sx!==null){const d=e.changedTouches[0].cli
 go(0);st()})();
 /* AUTO-UPDATE: every time the game opens it checks the server for a newer version and reloads itself once.
    When you publish a new index.html, change this BUILD text (e.g. 20261013a) so players pick it up. */
-const BUILD="20261015b";
+const BUILD="20261016b";
 (function(){try{fetch(location.pathname+"?c="+Date.now(),{cache:"no-store"}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD="([^"]+)"/);
   if(m&&m[1]!==BUILD&&new URLSearchParams(location.search).get("v")!==m[1])location.replace(location.pathname+"?v="+m[1]+location.hash)}).catch(()=>{})}catch(e){}})();
 buildBoard();
