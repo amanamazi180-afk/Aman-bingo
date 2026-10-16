@@ -36,6 +36,8 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 .form label{color:var(--mut);font-size:13px}
 .form input{width:100%}
 .won{color:var(--gold)}
+.acc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0;display:flex;flex-direction:column;gap:8px}
+.acc h3{margin:0;font-size:16px;color:var(--gold)}
 </style>
 </head>
 <body>
@@ -53,7 +55,7 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 <script>
 // Same address the page is opened from. The old github.io page still talks to the Worker directly.
 const API = location.hostname.endsWith("github.io") ? "https://aman-bingo.amanamazi180.workers.dev" : "";
-const TABS = ["Overview","Pending","Players","Rounds","Game","Bonus","Weekly","Log"];
+const TABS = ["Overview","Pending","Players","Rounds","Game","Accounts","Bonus","Weekly","Log"];
 let q = "";
 const tgd = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) || "";
 if(tgd){ try{ Telegram.WebApp.ready(); Telegram.WebApp.expand(); }catch(e){} }
@@ -73,13 +75,23 @@ async function call(path, body){
   if(r.status===404) throw new Error("The Worker has no route " + path + ". Add this route to worker.js.");
   if(!r.ok){
     const t = await r.text(); let m = t; try { m = JSON.parse(t).error || t; } catch(e){}
-    const nice = { insufficient_balance:"That player does not have enough balance.", bad_input:"Please check what you entered (cartela numbers 1-400, amount at least 1 birr).", no_player:"Player not found.", bonus_taken:"One of those cartelas is already taken in the open round. Choose other cartelas, or set the bonus for the next round number.", already_paid:"Last week was already paid.", no_prizes:"Set the prizes first (for example 3000, 2000, 1000).", no_winners:"Nobody played last week, so there is nothing to pay.", bad_round:"That round number is not allowed. Leave it empty, or enter a round that has not started yet." }[m];
+    const nice = { insufficient_balance:"That player does not have enough balance.", bad_input:"Please check what you entered (cartela numbers 1-600, amount at least 1 birr; account number 4-30 characters, name 2-40 characters).", no_player:"Player not found.", bonus_taken:"One of those cartelas is already taken in the open round. Choose other cartelas, or set the bonus for the next round number.", already_paid:"Last week was already paid.", no_prizes:"Set the prizes first (for example 3000, 2000, 1000).", no_winners:"Nobody played last week, so there is nothing to pay.", bad_image:"That picture could not be used. Choose a normal photo (JPG or PNG).", bad_round:"That round number is not allowed. Leave it empty, or enter a round that has not started yet." }[m];
     throw new Error(nice || ("Server error " + r.status + ": " + t.slice(0,200)));
   }
   return r.json();
 }
 
+// makes a small JPEG (max 480 px) from the chosen picture so it uploads fast
+function fileToJpeg(file, max){ return new Promise((ok, no) => { const fr = new FileReader(); fr.onerror = () => no(new Error("Cannot read this file."));
+  fr.onload = () => { const im = new Image(); im.onerror = () => no(new Error("Cannot read this picture."));
+    im.onload = () => { const k = Math.min(1, max / Math.max(im.width, im.height)), c = document.createElement("canvas"); c.width = Math.max(1, Math.round(im.width * k)); c.height = Math.max(1, Math.round(im.height * k));
+      const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height); ok(c.toDataURL("image/jpeg", 0.85)); };
+    im.src = fr.result; };
+  fr.readAsDataURL(file); }); }
+
 function list(items, fn){ return items && items.length ? items.map(fn).join("") : '<div class="empty">Nothing here yet.</div>'; }
+
+const BANKNAME = { telebirr:"Telebirr", boa:"Bank of Abyssinia (BOA)", dashen:"Dashen Bank", cbe:"Commercial Bank of Ethiopia (CBE)" };
 
 const views = {
   async Overview(){
@@ -89,8 +101,12 @@ const views = {
   },
   async Pending(){
     const d = await call("/api/admin/pending");
+    const lbl = { approved:"✅ Approved", paid:"✅ Paid", rejected:"❌ Rejected" };
+    const hist = d.history || [];
     return list(d.items, p => `<div class="row"><div><b>${esc(p.type)} ${esc(p.amount)} birr</b><small>${esc(p.name)} · ${esc(p.phone)}</small><small>${esc(p.detail)}</small></div>
-      <div class="acts"><button class="ok" data-a="approve" data-type="${esc(p.type)}" data-id="${esc(p.id)}">${p.type==="withdraw"?"Mark paid":"Approve"}</button><button class="bad" data-a="reject" data-type="${esc(p.type)}" data-id="${esc(p.id)}">Reject</button></div></div>`);
+      <div class="acts"><button class="ok" data-a="approve" data-type="${esc(p.type)}" data-id="${esc(p.id)}">${p.type==="withdraw"?"Mark paid":"Approve"}</button><button class="bad" data-a="reject" data-type="${esc(p.type)}" data-id="${esc(p.id)}">Reject</button></div></div>`)
+      + `<h2 style="font-size:16px;margin:20px 0 2px">History · last 24 hours</h2><small style="color:var(--mut)">Handled requests stay here for 24 hours and then disappear from this list.</small>`
+      + (hist.length ? hist.map(h => `<div class="row"><div><b>${esc(h.type)} ${esc(h.amount)} birr</b><small>${esc(h.name)} · ${esc(h.phone)}</small><small>${esc(h.detail)}</small></div><small style="text-align:right"><b>${lbl[h.status] || esc(h.status)}</b><br>${esc(new Date(h.ts).toLocaleString())}</small></div>`).join("") : '<div class="empty">No handled requests in the last 24 hours.</div>');
   },
   async Players(){
     const d = await call("/api/admin/players?q=" + encodeURIComponent(q));
@@ -110,6 +126,22 @@ const views = {
       <div class="card"><b>${esc(d.cards)}</b><span>Cards</span></div></div>
       <div class="row"><div class="acts">${d.paused ? '<button class="ok" data-a="resume">Resume game</button>' : '<button class="bad" data-a="pause">Pause new rounds</button>'}<button data-a="game-start">Start round (if idle)</button><button class="bad" data-a="game-stop">Cancel round and refund</button></div></div>
       <div class="row"><div class="acts"><input id="stake" type="number" min="1" step="any" value="${esc(d.next_stake)}" style="width:110px"><button class="pri" data-a="save-stake">Save stake</button></div><small>Stake for new rounds (birr). The current round keeps its stake.</small></div>`;
+  },
+  async Accounts(){ // deposit accounts (number, name and picture) shown to players in the bot and in the game wallet
+    const d = await call("/api/admin/accounts");
+    const order = ["telebirr","boa","dashen","cbe"];
+    return `<small style="color:var(--mut)">These are the accounts players are told to pay into. A change is used at once in the bot deposit steps and in the game Wallet. Money already sent to an old account is not affected.</small>` +
+      order.map(k => { const x = d.items[k] || {a:"",h:"",img:""};
+        return `<div class="acc"><h3>${BANKNAME[k]}${k==="cbe" ? (d.cbe_on ? " · shown to players" : " · hidden in the bot until you save it") : ""}</h3>
+          <label style="color:var(--mut);font-size:13px">Account / phone number</label>
+          <input id="ac-n-${k}" value="${esc(x.a)}" autocomplete="off" inputmode="numeric">
+          <label style="color:var(--mut);font-size:13px">Account holder name</label>
+          <input id="ac-h-${k}" value="${esc(x.h)}" autocomplete="off">
+          <div><button class="pri" data-a="save-acc" data-bank="${k}">Save ${BANKNAME[k].split(" ")[0]}</button></div>
+          <label style="color:var(--mut);font-size:13px">Account picture (shown to players in the game wallet and sent with the deposit instructions in the bot)</label>
+          ${x.img ? `<img src="${esc(x.img)}" alt="" style="width:96px;height:96px;object-fit:cover;border-radius:12px;border:1px solid var(--line)">` : '<small style="color:var(--mut)">No picture yet.</small>'}
+          <input id="ac-f-${k}" type="file" accept="image/*">
+          <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="ok" data-a="upload-acc-img" data-bank="${k}">Upload picture</button>${x.img ? `<button class="bad" data-a="clear-acc-img" data-bank="${k}">Remove picture</button>` : ""}</div></div>`; }).join("");
   },
   async Bonus(){
     const d = await call("/api/admin/bonus");
@@ -174,6 +206,22 @@ $("view").onclick = async e => {
     } else if(a==="save-stake"){
       const v = Number($("stake").value); if(!(v>=1)) return say("Enter a stake of at least 1 birr.", "err");
       await call("/api/admin/set-stake", {stake:v});
+    } else if(a==="save-acc"){
+      const bank = e.target.dataset.bank, number = $("ac-n-"+bank).value.trim(), name = $("ac-h-"+bank).value.trim();
+      if(number.length<4) return say("Enter the account or phone number.", "err");
+      if(name.length<2) return say("Enter the account holder name.", "err");
+      if(!confirm("Save this " + BANKNAME[bank] + " account?\n\n" + number + "\n" + name + "\n\nPlayers will be told to pay into it.")) return;
+      await call("/api/admin/set-account", {bank, number, name});
+      say("Account saved. Players now see the new number and name.", "good"); setTimeout(show, 700); return;
+    } else if(a==="upload-acc-img"){
+      const bank = e.target.dataset.bank, f = $("ac-f-"+bank).files[0]; if(!f) return say("Choose a picture first.", "err");
+      const data = await fileToJpeg(f, 480);
+      await call("/api/admin/set-account-image", {bank, data});
+      say("Picture saved.", "good"); setTimeout(show, 700); return;
+    } else if(a==="clear-acc-img"){
+      const bank = e.target.dataset.bank; if(!confirm("Remove this picture?")) return;
+      await call("/api/admin/clear-account-image", {bank});
+      say("Picture removed.", "good"); setTimeout(show, 700); return;
     } else if(a==="save-bonus"){
       const cartelas = $("bn-c").value.trim(); if(!cartelas) return say("Enter the bonus cartela numbers.", "err");
       const amount = Number($("bn-amt").value); if(!(amount>=1) && !/=/.test(cartelas)) return say("Enter a bonus amount of at least 1 birr.", "err");
