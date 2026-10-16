@@ -143,6 +143,10 @@ const bankKb = (env, flow) => {
   return { inline_keyboard: rows };
 };
 const acctText = (env, k) => k === 'telebirr' ? '📱 ቴሌብር: 0958828304\n👤 ስም: AMANUEL' : k === 'boa' ? '🏦 አቢሲኒያ ባንክ (BOA): 266199511\n👤 ስም: AMANUEL YISMAH' : k === 'dashen' ? '🏦 ዳሽን ባንክ: 5901914597011\n👤 ስም: AMANUEL YISMAH' : '🏦 ንግድ ባንክ (CBE): ' + (env.CBE_ACCOUNT || '');
+// plain account number of a bank (used by the copy button)
+const acctNo = (env, k) => k === 'telebirr' ? '0958828304' : k === 'boa' ? '266199511' : k === 'dashen' ? '5901914597011' : ((String(env.CBE_ACCOUNT || '').match(/\d{6,}/) || [''])[0]);
+// inline buttons that copy the account number and the amount with one tap (Telegram copy_text button)
+const copyKb = (env, k, amt) => { const no = acctNo(env, k), rows = []; if (no) rows.push([{ text: '📋 የአካውንት ቁጥር ኮፒ: ' + no, copy_text: { text: no } }]); if (amt) rows.push([{ text: '📋 መጠን ኮፒ: ' + amt + ' ብር', copy_text: { text: String(amt) } }]); return rows.length ? { inline_keyboard: rows } : undefined };
 
 // where a player is in a multi-step flow (deposit / withdraw / transfer); expires after 30 minutes
 const setState = (env, uid, step, data) => env.DB.prepare('INSERT INTO bot_state(uid,step,data,ts) VALUES(?1,?2,?3,?4) ON CONFLICT(uid) DO UPDATE SET step=?2,data=?3,ts=?4').bind(uid, step, JSON.stringify(data || {}), Date.now()).run();
@@ -493,7 +497,9 @@ async function onPlayerCb(env, q, parts) { // menu / bank / cancel buttons
     if (flow === 'd') {
       if (!st || st.step !== 'dep_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «ገንዘብ አስገባ» ን እንደገና ይጫኑ።');
       await setState(env, uid, 'dep_paste', { amt: st.amt, method: bank });
-      return sendTo(env, uid, `የሚያጋጥማቹ የክፍያ ችግር:\n${SUPPORT} ላይ ፃፉልን።\n\n1. ከታች ባለው አካውንት ${st.amt} ብር ያስገቡ\n${acctText(env, bank)}\n\n2. የከፈሉበትን አጭር የጽሁፍ መልዕክት (SMS) ኮፒ በማድረግ እዚህ ላይ ፔስት (Paste) አድርገው ያስገቡና ይላኩት 👇👇👇\n\n⚠️ መልዕክቱን ሙሉ በሙሉ ያለምንም ለውጥ ይላኩ (የግብይት ቁጥሩን ጨምሮ)።`);
+      const dtxt = `የሚያጋጥማቹ የክፍያ ችግር:\n${SUPPORT} ላይ ፃፉልን።\n\n1. ከታች ባለው አካውንት ${st.amt} ብር ያስገቡ\n${acctText(env, bank)}\n\n2. የከፈሉበትን አጭር የጽሁፍ መልዕክት (SMS) ኮፒ በማድረግ እዚህ ላይ ፔስት (Paste) አድርገው ያስገቡና ይላኩት 👇👇👇\n\n⚠️ መልዕክቱን ሙሉ በሙሉ ያለምንም ለውጥ ይላኩ (የግብይት ቁጥሩን ጨምሮ)።`;
+      const kc = copyKb(env, bank, st.amt), rr = kc ? await tg(env, 'sendMessage', { chat_id: uid, text: dtxt, reply_markup: kc }) : null;
+      return rr && rr.ok ? rr : sendTo(env, uid, dtxt);
     }
     if (flow === 'w') {
       if (!st || st.step !== 'wd_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «አውጣ» ን እንደገና ይጫኑ።');
