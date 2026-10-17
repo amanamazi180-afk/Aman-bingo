@@ -11,6 +11,7 @@
 // WEEKLY TOP PLAYERS: players are ranked by games played in the week (Monday 00:00 - Sunday 24:00 Ethiopia time). The admin sets the prizes (Admin > Weekly) and pays last week's winners with one button.
 // BOTTOM KEYBOARD: the bot shows a permanent keyboard under the chat box (ጨዋታ ተጫወት, ገንዘብ አስገባ, ቀሪ ሂሳብ) after /start and after registration.
 // LANGUAGE: every message and button the bot sends is in Amharic. CARTELAS: 1 to 600 (TOTAL below).
+// FAKE-TEXT SCAN: money is credited automatically only when the forwarded bank SMS has the same transaction number and amount; unmatched deposits reach the admin with a checklist (SMS found?, amount equal?, number format, player history); max 3 pending deposits per player.
 // ACCOUNTS: the admin edits the deposit accounts (number, name, picture) in Admin > Accounts; the bot and the game wallet use them at once.
 // WINNER MESSAGE: when a round ends, every winner gets a bot message "ዙር <round> አሸናፊ ሆነዋል ብር = <prize>" (sent once, from settle()).
 import { DurableObject } from 'cloudflare:workers';
@@ -213,10 +214,24 @@ async function decideWithdraw(env, id, paid) {
 // a deposit request (from the app or from the bot): auto-credited when a matching bank SMS (same transaction number and amount) was already forwarded to /sms, otherwise sent to the admins and credited the moment the SMS arrives
 async function makeDeposit(env, u, amt, txid, method) {
   const db = env.DB, now = Date.now(); let id;
+  if ((await db.prepare("SELECT COUNT(*) c FROM deposits WHERE user_id=? AND status='pending'").bind(u.id).first()).c >= 3) return { error: 'too_many_pending' }; // fake-claim guard: no more than 3 unconfirmed requests per player
   try { id = (await db.prepare('INSERT INTO deposits(user_id,txid,amount_c,method,status,ts) VALUES(?,?,?,?,?,?)').bind(u.id, txid, C(amt), method, 'pending', now).run()).meta.last_row_id } catch (e) { return { error: 'txid_used' } }
   const ok = await tryMatch(env, txid);
-  if (!ok) await notifyAdmins(env, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid }), [[{ text: '✅ አጽድቅ', callback_data: 'da:' + id }, { text: '❌ ውድቅ', callback_data: 'dr:' + id }]]);
+  if (!ok) await notifyAdmins(env, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid, flags: await depositChecks(env, u, { amount_c: C(amt), method, txid }) }), [[{ text: '✅ አጽድቅ', callback_data: 'da:' + id }, { text: '❌ ውድቅ', callback_data: 'dr:' + id }]]);
   return { status: ok ? 'approved' : 'pending', id };
+}
+// Fake-text scan. Money is credited automatically ONLY when the real bank SMS (forwarded by the SMS app) has the same transaction number AND the same amount, so a made-up or edited text can never add balance by itself.
+// For a deposit that is NOT matched, the admin gets these checks so a forged claim is easy to spot before pressing Approve.
+async function depositChecks(env, u, d) {
+  const db = env.DB, f = [], t = d.txid;
+  const s = await db.prepare('SELECT amount_c FROM sms_log WHERE txid=?').bind(t).first();
+  if (!s) f.push('❌ ከባንክ የተላከ ተዛማጅ SMS አልደረሰም — ገንዘቡ በእርግጥ መግባቱን በባንክ አፕዎ ካላረጋገጡ አያጽድቁ');
+  else if (s.amount_c !== d.amount_c) f.push(`🚨 መጠን አይመሳሰልም! በእውነተኛው SMS ላይ ${B(s.amount_c)} ብር፣ ተጫዋቹ ግን ${B(d.amount_c)} ብር ብሏል — የተቀየረ መልዕክት ሊሆን ይችላል`);
+  const okfmt = d.method === 'telebirr' ? /^[A-Z0-9]{10}$/.test(t) : d.method === 'boa' || d.method === 'cbe' ? /^FT[A-Z0-9]{10}$/.test(t) : /^[A-Z0-9]{8,24}$/.test(t);
+  if (!okfmt) f.push(`⚠️ የግብይት ቁጥሩ ለ${BANKS[d.method] || d.method} ያልተለመደ ነው (${t})`);
+  const h = await db.prepare("SELECT COALESCE(SUM(status='approved'),0) ok,COALESCE(SUM(status='rejected'),0) rej FROM deposits WHERE user_id=? AND txid<>?").bind(u.id, t).first();
+  f.push(`👤 ቀድሞ የጸደቁ ገቢዎች: ${h.ok} · ውድቅ የተደረጉ: ${h.rej}` + (Date.now() - (u.created_ts || Date.now()) < 864e5 ? ' · 🆕 አዲስ አካውንት (ከ24 ሰዓት በታች)' : '') + (h.ok === 0 ? ' · የመጀመሪያ ገቢ' : ''));
+  return f.join('\n');
 }
 // a withdrawal request: balance is taken now and given back if an admin rejects it
 async function makeWithdrawal(env, u, amt, account, method) {
@@ -539,6 +554,7 @@ async function onStep(env, u, st, text) { // the player typed something while in
     const amt = pr.amount_c ? B(pr.amount_c) : st.amt; // the amount written in the bank SMS is the real money, so it wins over the typed amount
     if (amt < MIN_DEP) return sendTo(env, uid, `⚠️ ማስገባት የሚችሉት ከ ${MIN_DEP} ብር ጀምሮ ነው። በመልዕክቱ ላይ ያለው መጠን ${amt} ብር ነው።`);
     const r = await makeDeposit(env, u, amt, pr.txid, pr.bank || st.method);
+    if (r.error === 'too_many_pending') { await clearState(env, uid); return sendMenu(env, uid, '⚠️ ብዙ ያልተረጋገጡ የገቢ ጥያቄዎች አሉዎት። እስኪረጋገጡ ይጠብቁ ወይም ' + SUPPORT + ' ያነጋግሩ።') }
     if (r.error) return sendTo(env, uid, '⚠️ ይህ የግብይት ቁጥር ከዚህ በፊት ተመዝግቧል። ሌላ መልዕክት ያስገቡ።');
     await clearState(env, uid);
     return r.status === 'approved' ? null : sendMenu(env, uid, `⏳ የ${amt} ብር ጥያቄዎ ደርሶናል። መልዕክቱ ሲረጋገጥ ገንዘቡ በራስ-ሰር ወደ ሂሳብዎ ይጨመራል (አስተዳዳሪውም ያረጋግጣል)።`);
@@ -656,7 +672,7 @@ async function onTelegram(env, up) {
   if (cmd === '/instruction') return menuAction(env, u, 'ins');
   return sendMenu(env, uid, '🎮 እንኳን ደህና መጡ! ከታች ካሉት አማራጮች ይምረጡ።');
 }
-const depositText = x => `💰 ገቢ #${x.id}\n${x.name} · ${x.phone}\nመጠን: ${B(x.amount_c)} ብር በ ${x.method}\nየግብይት ቁጥር: ${x.txid}\nየሚዛመድ SMS ገና አልደረሰም — SMS ሲደርስ በራስ-ሰር ይጨመራል፤ ገንዘቡ በእርግጥ መድረሱን ካረጋገጡ ብቻ በእጅ ያጽድቁ።`;
+const depositText = x => `💰 ገቢ #${x.id}\n${x.name} · ${x.phone}\nመጠን: ${B(x.amount_c)} ብር በ ${x.method}\nየግብይት ቁጥር: ${x.txid}\nየሚዛመድ SMS ገና አልደረሰም — SMS ሲደርስ በራስ-ሰር ይጨመራል፤ ገንዘቡ በእርግጥ መድረሱን ካረጋገጡ ብቻ በእጅ ያጽድቁ።` + (x.flags ? '\n\n🔎 ምርመራ፦\n' + x.flags : '');
 const notifyAdmins = async (env, text, kb) => Promise.all((await admins(env)).map(a => say(env, a, text, kb)));
 const withdrawText = x => `💸 ወጪ #${x.id}\n${x.name} · ${x.phone}\nመጠን: ${B(x.amount_c)} ብር\nይላክ ወደ: ${x.method} ${x.account}`;
 
@@ -684,10 +700,10 @@ async function adminRoute(req, env, url) {
     });
   }
   if (name === 'pending') {
-    const d = (await db.prepare("SELECT d.id,d.amount_c,d.method,d.txid,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending' ORDER BY d.id").all()).results;
+    const d = (await db.prepare("SELECT d.id,d.amount_c,d.method,d.txid,u.name,u.phone,(SELECT amount_c FROM sms_log WHERE txid=d.txid) sms_c FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending' ORDER BY d.id").all()).results;
     const w = (await db.prepare("SELECT w.id,w.amount_c,w.method,w.account,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status='pending' ORDER BY w.id").all()).results;
     return J({ items: [
-      ...d.map(x => ({ type: 'deposit', id: x.id, amount: B(x.amount_c), name: x.name, phone: x.phone, detail: x.method + ' · tx ' + x.txid })),
+      ...d.map(x => ({ type: 'deposit', id: x.id, amount: B(x.amount_c), name: x.name, phone: x.phone, detail: x.method + ' · tx ' + x.txid + (x.sms_c == null ? ' · ❌ no matching bank SMS yet' : x.sms_c !== x.amount_c ? ' · 🚨 real SMS says ' + B(x.sms_c) + ' birr (claimed ' + B(x.amount_c) + ')' : ' · ✅ SMS matches') })),
       ...w.map(x => ({ type: 'withdraw', id: x.id, amount: B(x.amount_c), name: x.name, phone: x.phone, detail: 'send to ' + x.method + ' ' + x.account }))
     ] });
   }

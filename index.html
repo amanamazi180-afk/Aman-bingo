@@ -191,7 +191,7 @@ const $=i=>document.getElementById(i),CL=["#3b82f6","#06b6d4","#22c55e","#f5b73b
 const L=n=>"BINGO"[Math.floor((n-1)/15)],F=n=>String(+Number(n).toFixed(2));
 const PAY={telebirr:{n:"Telebirr",a:"0958828304",h:"AMANUEL"},cbe:{n:"CBE",a:"0958828304",h:"AMANUEL YISMAH"},boa:{n:"BOA",a:"266199511",h:"AMANUEL YISMAH"},dashen:{n:"Dashen Bank",a:"5901914597011",h:"AMANUEL YISMAH"}};
 const LG={telebirr:["#0a8fd8","T"],boa:["#c9a227","B"],dashen:["#1b4fa3","D"],cbe:["#7b2a7e","C"]};
-const ERR={no_api:"የሰርቨር አድራሻ አልተቀመጠም (index.html API መስመር)",not_registered:"እባክዎ መጀመሪያ በቦቱ ይመዝገቡ (ስልክ ቁጥርዎን ያጋሩ)",insufficient_balance:"በቂ ሒሳብ የለዎትም - መጀመሪያ ገቢ ያድርጉ",round_closed:"ዙሩ ጀምሯል",max_cards:"ከ2 ካርቴላ በላይ መያዝ አይችሉም",taken:"ካርቴላው ተይዟል",bad_input:"ያስገቡትን ቁጥሮች ያረጋግጡ",txid_used:"ይህ የግብይት ቁጥር ቀድሞ ጥቅም ላይ ውሏል",deposit_required:"ወጪ ከማድረግዎ በፊት ገቢ ያድርጉ",withdraw_pending:"በመጠባበቅ ላይ ያለ የወጪ ጥያቄ አለዎት። እስኪፈቀድ ይጠብቁ።",unauthorized:"ጨዋታውን ከቴሌግራም ቦት ይክፈቱ",server_error:"የሰርቨር ችግር፣ እንደገና ይሞክሩ",banned:"አካውንትዎ ታግዷል። ድጋፍን ያነጋግሩ።",paused:"ጨዋታው ለጊዜው ቆሟል",locked:"🔒 ይህ ዙር ተቆልፏል፦ የያዙትን ካርቴላ መቀየር አይቻልም"};
+const ERR={no_api:"የሰርቨር አድራሻ አልተቀመጠም (index.html API መስመር)",not_registered:"እባክዎ መጀመሪያ በቦቱ ይመዝገቡ (ስልክ ቁጥርዎን ያጋሩ)",insufficient_balance:"በቂ ሒሳብ የለዎትም - መጀመሪያ ገቢ ያድርጉ",round_closed:"ዙሩ ጀምሯል",max_cards:"ከ2 ካርቴላ በላይ መያዝ አይችሉም",taken:"ካርቴላው ተይዟል",bad_input:"ያስገቡትን ቁጥሮች ያረጋግጡ",too_many_pending:"በመጠባበቅ ላይ ብዙ የገቢ ጥያቄዎች አሉዎት። እስኪረጋገጡ ይጠብቁ።",txid_used:"ይህ የግብይት ቁጥር ቀድሞ ጥቅም ላይ ውሏል",deposit_required:"ወጪ ከማድረግዎ በፊት ገቢ ያድርጉ",withdraw_pending:"በመጠባበቅ ላይ ያለ የወጪ ጥያቄ አለዎት። እስኪፈቀድ ይጠብቁ።",unauthorized:"ጨዋታውን ከቴሌግራም ቦት ይክፈቱ",server_error:"የሰርቨር ችግር፣ እንደገና ይሞክሩ",banned:"አካውንትዎ ታግዷል። ድጋፍን ያነጋግሩ።",paused:"ጨዋታው ለጊዜው ቆሟል",locked:"🔒 ይህ ዙር ተቆልፏል፦ የያዙትን ካርቴላ መቀየር አይቻልም"};
 let ready=false,S=null,off=0,inGame=false,looping=false,snd_on=true,lastN=0,rid=0,key="",reg=false,pend=0,gkey="";
 /* SHS = the called numbers that are SHOWN on screen. A number is shown at the exact moment its voice starts, so the screen and the voice are always in sync. */
 let SHS=new Set();const endAt={id:0,t:0};
@@ -425,7 +425,7 @@ bn.addEventListener("touchend",e=>{if(sx!==null){const d=e.changedTouches[0].cli
 go(0);st()})();
 /* AUTO-UPDATE: every time the game opens it checks the server for a newer version and reloads itself once.
    When you publish a new index.html, change this BUILD text (e.g. 20261013a) so players pick it up. */
-const BUILD="20261017b";
+const BUILD="20261017c";
 (function(){try{fetch(location.pathname+"?c="+Date.now(),{cache:"no-store"}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD="([^"]+)"/);
   if(m&&m[1]!==BUILD&&new URLSearchParams(location.search).get("v")!==m[1])location.replace(location.pathname+"?v="+m[1]+location.hash)}).catch(()=>{})}catch(e){}})();
 buildBoard();
