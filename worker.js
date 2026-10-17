@@ -14,6 +14,7 @@
 // FAKE-TEXT SCAN: money is credited automatically only when the forwarded bank SMS has the same transaction number and amount; unmatched deposits reach the admin with a checklist (SMS found?, amount equal?, number format, player history); max 3 pending deposits per player.
 // ACCOUNTS: the admin edits the deposit accounts (number, name, picture) in Admin > Accounts; the bot and the game wallet use them at once.
 // WINNER MESSAGE: when a round ends, every winner gets a bot message "ዙር <round> አሸናፊ ሆነዋል ብር = <prize>" (sent once, from settle()).
+// AUTO-TAKE: Admin > AutoTake switches on automatic taking of N random cartelas every round for the support account; a win pays the support account (see autoTake() below).
 import { DurableObject } from 'cloudflare:workers';
 const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 600, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
@@ -326,9 +327,10 @@ async function refreshManual(env, r, rc, now) { // players with Automatic switch
 async function settle(env, r, picks, w, now) { // pays the winners and ends the round; returns false if another request already did
   await ensureTables(env);
   const db = env.DB, prize = Math.floor(picks.length * r.stake_c * CUT), share = Math.floor(prize / w.picks.length);
+  let sup = 0; try { sup = Number(JSON.parse(await getSet(env, 'autotake') || '{}').uid) || 0 } catch (e) { } // the support account never appears in the weekly ranking
   const res = await db.batch([...w.picks.map(p => db.prepare("UPDATE users SET balance=balance+?3 WHERE id=?2 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running')").bind(r.id, p.user_id, share)),
     // weekly ranking: every player of this round gets +1 game (only while the round is still 'running', so it can never count twice)
-    db.prepare("INSERT INTO wk_games(week,user_id,games) SELECT ?2,user_id,1 FROM(SELECT DISTINCT user_id FROM picks WHERE round_id=?1) WHERE EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running') ON CONFLICT(week,user_id) DO UPDATE SET games=games+1").bind(r.id, weekStart(now)),
+    db.prepare("INSERT INTO wk_games(week,user_id,games) SELECT ?2,user_id,1 FROM(SELECT DISTINCT user_id FROM picks WHERE round_id=?1 AND user_id<>?3) WHERE EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running') ON CONFLICT(week,user_id) DO UPDATE SET games=games+1").bind(r.id, weekStart(now), sup),
     db.prepare("UPDATE rounds SET status='ended',ended_ts=?2,called_n=?3,winners=?4 WHERE id=?1 AND status='running'").bind(r.id, now, w.k, JSON.stringify(w.picks.map(p => p.cartela)))]);
   const done = res[res.length - 1].meta.changes > 0;
   if (done) { // only the request that really ended the round gets here, so every winner receives the message exactly once
@@ -336,6 +338,33 @@ async function settle(env, r, picks, w, now) { // pays the winners and ends the 
     await Promise.all([...per].map(([id, c]) => tg(env, 'sendMessage', { chat_id: id, text: `ዙር ${r.id} አሸናፊ ሆነዋል ብር = ${B(c)}` })));
   }
   return done;
+}
+/* ---------- AUTO-TAKE: the admin switches it ON and picks a number N. At the start of every round the server takes N random free cartelas
+   for the SUPPORT account (settings.autotake = {on,n,uid}). They are paid like a normal player's cartelas (stake from the support balance) and
+   if one of them wins, the prize goes to the support account. It repeats every round until the admin switches it OFF. ---------- */
+let atDone = 0;
+async function autoTake(env, r) {
+  if (atDone === r.id) return;
+  let cf = null; try { cf = JSON.parse(await getSet(env, 'autotake') || 'null') } catch (e) { }
+  if (!cf || !cf.on || !(cf.n >= 1) || !(cf.uid > 0)) return;
+  const db = env.DB, mk = await db.prepare("SELECT v FROM settings WHERE k='at_round'").first();
+  if (mk && mk.v === String(r.id)) { atDone = r.id; return } // this round was already filled (e.g. the hub restarted)
+  await db.prepare("INSERT INTO settings(k,v) VALUES('at_round',?1) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(String(r.id)).run(); atDone = r.id;
+  const taken = new Set((await db.prepare('SELECT cartela FROM picks WHERE round_id=?').bind(r.id).all()).results.map(x => x.cartela));
+  const bc = await bonusFor(env, r.id); if (bc) for (const i of bc.items) taken.add(i.c); // never use a secret bonus cartela
+  const free = []; for (let i = 1; i <= TOTAL; i++) if (!taken.has(i)) free.push(i);
+  for (let i = free.length - 1; i > 0; i--) { const j = rnd32() % (i + 1);[free[i], free[j]] = [free[j], free[i]] } // random order, different every round
+  let got = 0;
+  for (const no of free) {
+    if (got >= cf.n) break;
+    try {
+      const res = await db.batch([
+        db.prepare("INSERT INTO picks(round_id,cartela,user_id,bonus_c) SELECT ?1,?2,?3,0 WHERE (SELECT balance FROM users WHERE id=?3)>=?4 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, cf.uid, r.stake_c),
+        db.prepare("UPDATE users SET balance=balance-?4 WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)").bind(r.id, no, cf.uid, r.stake_c)]);
+      if (res[0].meta.changes === 0) break; // the support balance is too low for one more stake
+      got++;
+    } catch (e) { } // somebody took this cartela a moment ago: try the next one
+  }
 }
 async function advance(env) {
   const db = env.DB, now = Date.now(); let r = await latest(db);
@@ -345,6 +374,7 @@ async function advance(env) {
       r = await latest(db);
     }
   }
+  if (r && r.status === 'lobby' && now - r.start_ts < LOBBY_MS) { try { await autoTake(env, r) } catch (e) { } } // admin auto-take for the support account
   if (r.status === 'lobby' && now - r.start_ts >= LOBBY_MS) {
     const n = (await db.prepare('SELECT COUNT(DISTINCT user_id) n FROM picks WHERE round_id=?').bind(r.id).first()).n;
     if (n < 2) await refundAndClose(env, r, 'lobby', now); // a game needs at least 2 players
@@ -833,6 +863,25 @@ async function adminRoute(req, env, url) {
     const bank = String(b.bank || ''); if (!Object.keys(BANKS).includes(bank)) return J({ error: 'bad_input' }, 400);
     await db.prepare('DELETE FROM account_imgs WHERE bank=?').bind(bank).run(); await log('remove account picture', bank);
     return J({ ok: true });
+  }
+  if (name === 'autotake') { // admin: state of the automatic cartela taking
+    let cf = {}; try { const raw = await db.prepare("SELECT v FROM settings WHERE k='autotake'").first(); cf = (raw && JSON.parse(raw.v)) || {} } catch (e) { }
+    const sup = cf.uid ? await db.prepare('SELECT id,name,balance FROM users WHERE id=?').bind(cf.uid).first() : null;
+    const cr = env.HUB ? await hubOf(env).current() : null;
+    const taken = cr && cf.uid ? (await db.prepare('SELECT COUNT(*) c FROM picks WHERE round_id=? AND user_id=?').bind(cr.id, cf.uid).first()).c : 0;
+    return J({ on: !!cf.on, count: cf.n || 0, support: cf.uid || '', support_name: sup ? sup.name : null, balance: sup ? B(sup.balance) : null, round: cr ? cr.id : null, status: cr ? cr.status : null, taken });
+  }
+  if (name === 'set-autotake') { // {on:true, support:<telegram id>, count:<1-30>}  or  {on:false}
+    let cf = {}; try { const raw = await db.prepare("SELECT v FROM settings WHERE k='autotake'").first(); cf = (raw && JSON.parse(raw.v)) || {} } catch (e) { }
+    const on = !!b.on; let n = cf.n || 0, uid = cf.uid || 0;
+    if (b.count !== undefined && String(b.count).trim() !== '') { n = Math.floor(Number(b.count)); if (!(n >= 1 && n <= 30)) return J({ error: 'bad_input' }, 400) }
+    if (b.support !== undefined && String(b.support).trim() !== '') uid = Math.floor(Number(String(b.support).replace(/\D/g, '')));
+    if (on) {
+      if (!(n >= 1) || !(uid > 0)) return J({ error: 'no_support' }, 400);
+      if (!(await db.prepare('SELECT id FROM users WHERE id=?').bind(uid).first())) return J({ error: 'no_player' }, 409);
+    }
+    await setSet(env, 'autotake', JSON.stringify({ on, n, uid })); await log(on ? 'autotake ON' : 'autotake OFF', 'support ' + uid + ' · ' + n + ' cartelas per round'); await poke(env);
+    return J({ ok: true, on });
   }
   if (name === 'game' || name === 'game-start' || name === 'game-stop') {
     if (!env.HUB) return noHub();

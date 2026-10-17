@@ -55,7 +55,7 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 <script>
 // Same address the page is opened from. The old github.io page still talks to the Worker directly.
 const API = location.hostname.endsWith("github.io") ? "https://aman-bingo.amanamazi180.workers.dev" : "";
-const TABS = ["Overview","Pending","Players","Rounds","Game","Accounts","Bonus","Weekly","Log"];
+const TABS = ["Overview","Pending","Players","Rounds","Game","AutoTake","Accounts","Bonus","Weekly","Log"];
 let q = "";
 const tgd = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) || "";
 if(tgd){ try{ Telegram.WebApp.ready(); Telegram.WebApp.expand(); }catch(e){} }
@@ -75,7 +75,7 @@ async function call(path, body){
   if(r.status===404) throw new Error("The Worker has no route " + path + ". Add this route to worker.js.");
   if(!r.ok){
     const t = await r.text(); let m = t; try { m = JSON.parse(t).error || t; } catch(e){}
-    const nice = { insufficient_balance:"That player does not have enough balance.", bad_input:"Please check what you entered (cartela numbers 1-600, amount at least 1 birr; account number 4-30 characters, name 2-40 characters).", no_player:"Player not found.", bonus_taken:"One of those cartelas is already taken in the open round. Choose other cartelas, or set the bonus for the next round number.", already_paid:"Last week was already paid.", no_prizes:"Set the prizes first (for example 3000, 2000, 1000).", no_winners:"Nobody played last week, so there is nothing to pay.", bad_image:"That picture could not be used. Choose a normal photo (JPG or PNG).", bad_round:"That round number is not allowed. Leave it empty, or enter a round that has not started yet." }[m];
+    const nice = { insufficient_balance:"That player does not have enough balance.", bad_input:"Please check what you entered (cartela numbers 1-600, amount at least 1 birr; account number 4-30 characters, name 2-40 characters).", no_player:"That Telegram ID is not a registered player. The support account must open the bot and share its phone number first.", no_support:"Enter the support account Telegram ID and how many cartelas to take.", bonus_taken:"One of those cartelas is already taken in the open round. Choose other cartelas, or set the bonus for the next round number.", already_paid:"Last week was already paid.", no_prizes:"Set the prizes first (for example 3000, 2000, 1000).", no_winners:"Nobody played last week, so there is nothing to pay.", bad_image:"That picture could not be used. Choose a normal photo (JPG or PNG).", bad_round:"That round number is not allowed. Leave it empty, or enter a round that has not started yet." }[m];
     throw new Error(nice || ("Server error " + r.status + ": " + t.slice(0,200)));
   }
   return r.json();
@@ -126,6 +126,21 @@ const views = {
       <div class="card"><b>${esc(d.cards)}</b><span>Cards</span></div></div>
       <div class="row"><div class="acts">${d.paused ? '<button class="ok" data-a="resume">Resume game</button>' : '<button class="bad" data-a="pause">Pause new rounds</button>'}<button data-a="game-start">Start round (if idle)</button><button class="bad" data-a="game-stop">Cancel round and refund</button></div></div>
       <div class="row"><div class="acts"><input id="stake" type="number" min="1" step="any" value="${esc(d.next_stake)}" style="width:110px"><button class="pri" data-a="save-stake">Save stake</button></div><small>Stake for new rounds (birr). The current round keeps its stake.</small></div>`;
+  },
+  async AutoTake(){ // take cartelas automatically for the support account, every round, until switched OFF
+    const d = await call("/api/admin/autotake");
+    return `<div class="grid"><div class="card"><b style="color:${d.on ? "var(--ok)" : "var(--bad)"}">${d.on ? "ON" : "OFF"}</b><span>Take cartelas</span></div>
+      <div class="card"><b>${esc(d.count || 0)}</b><span>Cartelas per round</span></div>
+      <div class="card"><b>${esc(d.taken)}</b><span>Taken now (round ${esc(d.round)}, ${esc(d.status)})</span></div>
+      <div class="card"><b>${d.balance == null ? "-" : esc(d.balance)}</b><span>Support balance (birr)${d.support_name ? " · " + esc(d.support_name) : ""}</span></div></div>
+    <div class="form">
+      <small style="color:var(--mut)">While this is ON, at the start of every round the server takes this many random cartelas for your support account, a different set every round. The stake is paid from the support account balance (keep enough birr on it), and if one of these cartelas wins, the prize goes to the support account. Switch it OFF to stop from the next round.</small>
+      <label>Support account Telegram ID (it must have opened the bot and registered; find the ID in the Players tab)</label>
+      <input id="at-u" type="number" inputmode="numeric" value="${esc(d.support)}" autocomplete="off">
+      <label>How many cartelas to take every round (1 to 30)</label>
+      <input id="at-n" type="number" min="1" max="30" step="1" value="${esc(d.count || 5)}">
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="ok" data-a="autotake" data-on="1">Turn ON / save</button>${d.on ? '<button class="bad" data-a="autotake" data-on="0">Turn OFF</button>' : ""}</div>
+    </div>`;
   },
   async Accounts(){ // deposit accounts (number, name and picture) shown to players in the bot and in the game wallet
     const d = await call("/api/admin/accounts");
@@ -222,6 +237,11 @@ $("view").onclick = async e => {
       const bank = e.target.dataset.bank; if(!confirm("Remove this picture?")) return;
       await call("/api/admin/clear-account-image", {bank});
       say("Picture removed.", "good"); setTimeout(show, 700); return;
+    } else if(a==="autotake"){
+      const on = e.target.dataset.on === "1", body = { on };
+      if(on){ body.support = $("at-u").value.trim(); body.count = $("at-n").value.trim(); }
+      await call("/api/admin/set-autotake", body);
+      say(on ? "Take cartelas is ON. It starts with the open lobby or the next round." : "Take cartelas is OFF.", "good"); setTimeout(show, 700); return;
     } else if(a==="save-bonus"){
       const cartelas = $("bn-c").value.trim(); if(!cartelas) return say("Enter the bonus cartela numbers.", "err");
       const amount = Number($("bn-amt").value); if(!(amount>=1) && !/=/.test(cartelas)) return say("Enter a bonus amount of at least 1 birr.", "err");
