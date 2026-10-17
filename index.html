@@ -72,17 +72,17 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .rec{display:flex;gap:6px;justify-content:center}.rec span{border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;color:#fff}
 .recent .rec span{width:38px;height:38px;font-size:11px}
 .spk{background:none;border:0;font-size:24px;color:var(--tx)}
-/* BIG BALL: larger, glossy, and it ROLLS in from the right every time a number is called (starts together with the voice) */
+/* BIG BALL: solid yellow, a little smaller than before, and it ROLLS in from the right every time a number is called (starts together with the voice) */
 .bigbox{display:flex;align-items:center;justify-content:center;padding:8px 4px;overflow:hidden;position:relative}
 .bigbox:after{content:"";position:absolute;left:18%;right:18%;bottom:5px;height:7px;border-radius:50%;background:radial-gradient(ellipse at center,#0008,#0000 70%);pointer-events:none}
-.bigb{width:clamp(100px,32vw,150px);height:clamp(100px,32vw,150px);flex:none;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff 0,#f4f7ff 38%,#c9d3ea 100%);color:#0a1a3a;border:7px solid var(--or);display:flex;align-items:center;justify-content:center;font-size:clamp(26px,8.5vw,40px);font-weight:900;padding:0;white-space:nowrap;box-shadow:inset -6px -8px 14px #0a1a3a33,0 6px 14px #0006;will-change:transform}
+.bigb{width:clamp(86px,27vw,128px);height:clamp(86px,27vw,128px);flex:none;border-radius:50%;background:#ffd600;color:#1a1200;border:7px solid #ffd600;display:flex;align-items:center;justify-content:center;font-size:clamp(22px,7.2vw,34px);font-weight:900;padding:0;white-space:nowrap;box-shadow:0 6px 14px #0006;will-change:transform}
 @keyframes rollin{
- 0%{transform:translateX(150%) rotate(1080deg);opacity:.2}
- 55%{transform:translateX(-10%) rotate(-40deg);opacity:1}
- 72%{transform:translateX(5%) rotate(14deg)}
- 86%{transform:translateX(-2%) rotate(-5deg)}
- 100%{transform:translateX(0) rotate(0)}}
-@keyframes glow{0%,100%{box-shadow:inset -6px -8px 14px #0a1a3a33,0 6px 14px #0006}50%{box-shadow:inset -6px -8px 14px #0a1a3a33,0 0 26px 8px var(--or)}}
+ 0%{transform:translateY(-170%) rotate(-1080deg);opacity:.2}
+ 55%{transform:translateY(10%) rotate(40deg);opacity:1}
+ 72%{transform:translateY(-6%) rotate(-14deg)}
+ 86%{transform:translateY(2%) rotate(5deg)}
+ 100%{transform:translateY(0) rotate(0)}}
+@keyframes glow{0%,100%{box-shadow:0 6px 14px #0006}50%{box-shadow:0 0 26px 8px #ffd600}}
 .bigb.new{animation:rollin .95s cubic-bezier(.22,.7,.3,1),glow .6s ease-in-out .95s 3}
 /* COMPACT automatic toggle so the board gets more room */
 .auto{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;font-weight:800;letter-spacing:.04em;font-size:11px}
@@ -339,8 +339,8 @@ function drawGame(){
   if(gk!==gkey){gkey=gk; /* the board and cards are rebuilt only when a number is shown or the cartelas change */
     for(let i=1;i<=75;i++)$("b"+i).className="nn"+(i===n?" l":cl.includes(i)?" k":"");
     $("big").textContent=n?L(n)+"-"+n:"—";
-    /* BIG BALL: ring takes the colour of the BINGO letter, and the ball ROLLS in each time a new number appears (same moment as the voice) */
-    const bg=$("big");bg.style.borderColor=n?CL[Math.floor((n-1)/15)]:"";
+    /* BIG BALL: always solid yellow, and it ROLLS in each time a new number appears (same moment as the voice) */
+    const bg=$("big");
     const bk=r.id+"|"+cl.length;if(n&&bk!==window._bk){window._bk=bk;bg.classList.remove("new");void bg.offsetWidth;bg.classList.add("new")}
     $("rec").innerHTML=cl.slice(-3).reverse().map(x=>`<span style="background:${CL[Math.floor((x-1)/15)]}">${L(x)}-${x}</span>`).join("");
     $("mycards").innerHTML=S.mine.length?S.mine.map(c=>`<div class="mc"><div class="cn">ካርቴላ #${c}</div>${cardHTML(c,cl,null,n)}</div>`).join(""):'<div style="text-align:center;padding:26px 6px"><b style="font-size:20px">እየተመለከቱ<br>ነው</b><p class="hint" style="margin-top:10px">ቀጣዩ ዙር በቅርቡ ይጀምራል። እዚህ ይጠብቁ።</p></div>'}
@@ -425,7 +425,7 @@ bn.addEventListener("touchend",e=>{if(sx!==null){const d=e.changedTouches[0].cli
 go(0);st()})();
 /* AUTO-UPDATE: every time the game opens it checks the server for a newer version and reloads itself once.
    When you publish a new index.html, change this BUILD text (e.g. 20261013a) so players pick it up. */
-const BUILD="20261017c";
+const BUILD="20261017e";
 (function(){try{fetch(location.pathname+"?c="+Date.now(),{cache:"no-store"}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD="([^"]+)"/);
   if(m&&m[1]!==BUILD&&new URLSearchParams(location.search).get("v")!==m[1])location.replace(location.pathname+"?v="+m[1]+location.hash)}).catch(()=>{})}catch(e){}})();
 buildBoard();
