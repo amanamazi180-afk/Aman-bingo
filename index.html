@@ -24,6 +24,13 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 .row{display:flex;gap:8px;align-items:stretch}
 .pill{flex:1;background:var(--cd);border:1px solid var(--ln);border-radius:14px;padding:6px 4px;text-align:center}
 .pill small{display:block;font-size:10px;color:var(--mu);font-weight:700}.pill b{font-size:19px}.t b{color:var(--or);font-size:24px}
+/* LOBBY top row: ተመለስ | ደራሽ (white board, in the middle) | አድስ */
+.toprow{flex:none;align-items:stretch}
+.toprow .gb{flex:none;padding:8px 12px;font-size:14px;display:flex;align-items:center;white-space:nowrap}
+.dr{flex:1;min-width:0;background:#fff;border:1px solid #d6dcea;border-radius:14px;text-align:center;padding:4px 6px;display:flex;flex-direction:column;justify-content:center;color:#0a1a3a;box-shadow:0 2px 10px #0004}
+.dr small{display:block;font-size:11px;color:#5b6b8f;font-weight:800}
+.dr b{font-size:28px;line-height:1.1;color:#0a1a3a}
+.dr small.br{display:inline;font-size:12px}
 .hdr{display:flex;justify-content:space-between;align-items:center}.hdr b{font-family:'Noto Sans Ethiopic','Abyssinica SIL',sans-serif;font-size:24px;font-weight:900;color:var(--or)}
 .mid{flex:1;display:flex;flex-direction:column;justify-content:center;gap:10px;text-align:center;color:#a9b8da}
 .bot{display:flex;gap:12px;align-items:center;background:var(--cd);border:1px solid var(--ln);border-radius:26px;padding:14px}
@@ -77,13 +84,16 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
  100%{transform:translateX(0) rotate(0)}}
 @keyframes glow{0%,100%{box-shadow:inset -6px -8px 14px #0a1a3a33,0 6px 14px #0006}50%{box-shadow:inset -6px -8px 14px #0a1a3a33,0 0 26px 8px var(--or)}}
 .bigb.new{animation:rollin .95s cubic-bezier(.22,.7,.3,1),glow .6s ease-in-out .95s 3}
-.auto{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;font-weight:800;letter-spacing:.08em;font-size:12px}
-.sw{width:46px;height:26px;border-radius:13px;background:var(--gr);position:relative}.sw:after{content:"";position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff}
+/* COMPACT automatic toggle so the board gets more room */
+.auto{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;font-weight:800;letter-spacing:.04em;font-size:11px}
+.sw{width:38px;height:22px;border-radius:11px;background:var(--gr);position:relative}.sw:after{content:"";position:absolute;right:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff}
 .sw.off{background:#3a4a6e}.sw.off:after{right:auto;left:3px}
 .cardsbox{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px}
 .cardsbox .mc{padding:6px;margin-bottom:6px}.cardsbox .card .c{font-size:13px;aspect-ratio:1}.cardsbox .card .h{font-size:11px}
-.bar2{display:flex;gap:8px}.bar2 .gb{flex:1;padding:14px 10px;font-size:16px}
-#game .pill{padding:4px 2px}#game .pill b{font-size:17px}
+/* COMPACT bottom buttons (ውጣ / አድስ / አውቶማቲክ): small, so the 75-number board stretches taller */
+.bar2{display:flex;gap:6px;flex:none}.bar2 .gb{flex:1;padding:6px 6px;font-size:13px;border-radius:10px;line-height:1.2}
+.bar2 .gb:not(#act){flex:.55}
+#game .pill{padding:3px 2px}#game .pill b{font-size:16px}#game .pill small{font-size:9px}
 .gnav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#070e1f;border-top:1px solid var(--ln);padding:6px 0 calc(env(safe-area-inset-bottom,0px) + 4px);z-index:5}
 .gnav div{flex:1;text-align:center;font-size:11px;font-weight:800;color:var(--mu)}.gnav div span{display:block;font-size:20px}.gnav div.on{color:var(--gr)}
 /* BINGO banner shown on every win */
@@ -139,8 +149,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 
 <div class="s" id="lobby">
   <div class="bnr" id="bnr"></div>
-  <div class="pill t" style="flex:none;padding:10px"><small>ደራሽ</small><b id="lder" style="font-size:34px">0</b> <small style="display:inline">ብር</small></div>
-  <div class="row"><button class="gb" onclick="backHome()">← ተመለስ</button><div style="flex:1"></div><button class="gb" onclick="key='';tick()">⟳ አድስ</button></div>
+  <div class="row toprow"><button class="gb" onclick="backHome()">← ተመለስ</button><div class="dr"><small>ደራሽ</small><div><b id="lder">0</b> <small class="br">ብር</small></div></div><button class="gb" onclick="key='';tick()">⟳ አድስ</button></div>
   <div class="row"><div class="pill"><small>ዋና ቦርሳ</small><b id="lm">0</b></div><div class="pill"><small>የጨዋታ ቦርሳ</small><b id="lp">0</b></div><div class="pill"><small>ዋጋ</small><b id="ls">10</b></div><div class="pill"><small>ተጫዋቾች</small><b id="lpl">0</b></div><div class="pill t"><b id="lt">-</b></div></div>
   <p class="hint">ካርቴላ ለመምረጥ ቁጥር ይንኩ (እስከ 2)። <span style="color:#22c55e">አረንጓዴ</span> = የእርስዎ · <span style="color:#dc2626;font-weight:900">ቀይ</span> = የተያዘ · <span style="color:#f5b73b;font-weight:900">ወርቃማ</span> = የቦነስ አሸናፊ</p>
   <div class="grid" id="grid"></div>
@@ -414,7 +423,7 @@ bn.addEventListener("touchend",e=>{if(sx!==null){const d=e.changedTouches[0].cli
 go(0);st()})();
 /* AUTO-UPDATE: every time the game opens it checks the server for a newer version and reloads itself once.
    When you publish a new index.html, change this BUILD text (e.g. 20261013a) so players pick it up. */
-const BUILD="20261016b";
+const BUILD="20261017a";
 (function(){try{fetch(location.pathname+"?c="+Date.now(),{cache:"no-store"}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD="([^"]+)"/);
   if(m&&m[1]!==BUILD&&new URLSearchParams(location.search).get("v")!==m[1])location.replace(location.pathname+"?v="+m[1]+location.hash)}).catch(()=>{})}catch(e){}})();
 buildBoard();
