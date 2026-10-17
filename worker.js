@@ -11,6 +11,8 @@
 // WEEKLY TOP PLAYERS: players are ranked by games played in the week (Monday 00:00 - Sunday 24:00 Ethiopia time). The admin sets the prizes (Admin > Weekly) and pays last week's winners with one button.
 // BOTTOM KEYBOARD: the bot shows a permanent keyboard under the chat box (ጨዋታ ተጫወት, ገንዘብ አስገባ, ቀሪ ሂሳብ) after /start and after registration.
 // LANGUAGE: every message and button the bot sends is in Amharic. CARTELAS: 1 to 600 (TOTAL below).
+// ACCOUNTS: the admin edits the deposit accounts (number, name, picture) in Admin > Accounts; the bot and the game wallet use them at once.
+// WINNER MESSAGE: when a round ends, every winner gets a bot message "ዙር <round> አሸናፊ ሆነዋል ብር = <prize>" (sent once, from settle()).
 import { DurableObject } from 'cloudflare:workers';
 const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 600, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
@@ -135,16 +137,24 @@ const KBNOTE = '⌨️ አዲስ! ከታች ያሉትን ቁልፎች (ጨዋታ
 
 // banks offered in the deposit / withdraw flows (the CBE button shows only when CBE_ACCOUNT is set)
 const BANKS = { telebirr: 'TELEBIRR', cbe: 'CBE BIRR', boa: 'BOA', dashen: 'DASHEN' };
-const banksFor = env => Object.keys(BANKS).filter(k => k !== 'cbe' || env.CBE_ACCOUNT);
+const BANK_DEF = { telebirr: { a: '0958828304', h: 'AMANUEL' }, boa: { a: '266199511', h: 'AMANUEL YISMAH' }, dashen: { a: '5901914597011', h: 'AMANUEL YISMAH' }, cbe: { a: '', h: '' } }; // used until the admin saves an account (Admin > Accounts)
+let ACC = { ...BANK_DEF }; // the accounts players pay into; refreshed from the database at the start of every bot update (loadAcc)
+const cbeEnv = env => { const t = String(env.CBE_ACCOUNT || ''), m = t.match(/\d{6,}/); return m ? { a: m[0], h: (t.match(/\(([^)]*)\)/) || [])[1] || '' } : { a: '', h: '' } };
+async function loadAcc(env) { let s = {}; try { s = JSON.parse(await getSet(env, 'accounts') || '{}') || {} } catch (e) { } const o = {}; for (const k of Object.keys(BANKS)) { const v = s[k]; o[k] = v && v.a ? { a: String(v.a), h: String(v.h || '') } : k === 'cbe' ? cbeEnv(env) : { ...BANK_DEF[k] } } return ACC = o }
+const cbeOn = () => !!ACC.cbe.a; // the CBE button shows only when a CBE account exists (saved by the admin, or CBE_ACCOUNT)
+async function accountsFor(env, url, all) { await loadAcc(env); const im = {}; try { for (const r of (await env.DB.prepare('SELECT bank,ts FROM account_imgs').all()).results) im[r.bank] = r.ts } catch (e) { } const o = {}; for (const k of Object.keys(BANKS)) if (all || ACC[k].a) o[k] = { a: ACC[k].a, h: ACC[k].h, img: im[k] ? `${url.origin}/acc/${k}.jpg?v=${im[k]}` : '' }; return o }
+const banksFor = env => Object.keys(BANKS).filter(k => k !== 'cbe' || cbeOn());
 const bankKb = (env, flow) => {
   const b = banksFor(env).map(k => ({ text: BANKS[k], callback_data: `b:${flow}:${k}` })), rows = [];
   for (let i = 0; i < b.length; i += 2) rows.push(b.slice(i, i + 2));
   rows.push([{ text: '❌ ሰርዝ', callback_data: 'b:x' }]);
   return { inline_keyboard: rows };
 };
-const acctText = (env, k) => k === 'telebirr' ? '📱 ቴሌብር: 0958828304\n👤 ስም: AMANUEL' : k === 'boa' ? '🏦 አቢሲኒያ ባንክ (BOA): 266199511\n👤 ስም: AMANUEL YISMAH' : k === 'dashen' ? '🏦 ዳሽን ባንክ: 5901914597011\n👤 ስም: AMANUEL YISMAH' : '🏦 ንግድ ባንክ (CBE): ' + (env.CBE_ACCOUNT || '');
+const acctText = (env, k) => { const x = ACC[k] || { a: '', h: '' }; return (k === 'telebirr' ? '📱 ቴሌብር: ' : k === 'boa' ? '🏦 አቢሲኒያ ባንክ (BOA): ' : k === 'dashen' ? '🏦 ዳሽን ባንክ: ' : '🏦 ንግድ ባንክ (CBE): ') + x.a + (x.h ? '\n👤 ስም: ' + x.h : '') };
 // plain account number of a bank (used by the copy button)
-const acctNo = (env, k) => k === 'telebirr' ? '0958828304' : k === 'boa' ? '266199511' : k === 'dashen' ? '5901914597011' : ((String(env.CBE_ACCOUNT || '').match(/\d{6,}/) || [''])[0]);
+const acctNo = (env, k) => (ACC[k] && ACC[k].a) || '';
+// sends a photo from the saved picture (data URL) with a caption and optional inline buttons
+const sendPhotoData = (env, chat, dataUrl, caption, markup) => { try { const bytes = Uint8Array.from(atob(String(dataUrl).split(',')[1]), c => c.charCodeAt(0)), fd = new FormData(); fd.append('chat_id', String(chat)); fd.append('caption', caption); fd.append('photo', new Blob([bytes], { type: 'image/jpeg' }), 'account.jpg'); if (markup) fd.append('reply_markup', JSON.stringify(markup)); return fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendPhoto`, { method: 'POST', body: fd }).catch(() => null) } catch (e) { return Promise.resolve(null) } };
 // inline buttons that copy the account number and the amount with one tap (Telegram copy_text button)
 const copyKb = (env, k, amt) => { const no = acctNo(env, k), rows = []; if (no) rows.push([{ text: '📋 የአካውንት ቁጥር ኮፒ: ' + no, copy_text: { text: no } }]); if (amt) rows.push([{ text: '📋 መጠን ኮፒ: ' + amt + ' ብር', copy_text: { text: String(amt) } }]); return rows.length ? { inline_keyboard: rows } : undefined };
 
@@ -238,7 +248,8 @@ const ensureTables = async env => { if (tablesReady) return; await env.DB.batch(
   env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_games(week INTEGER,user_id INTEGER,games INTEGER DEFAULT 0,PRIMARY KEY(week,user_id))'), // games played per player per week (Monday 00:00 Ethiopia time)
   env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_wk_games ON wk_games(week,games DESC)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_paid(week INTEGER PRIMARY KEY,ts INTEGER)'), // weeks whose prizes were already paid (a week can be paid only once)
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_winners(week INTEGER,pos INTEGER,user_id INTEGER,name TEXT,prize_c INTEGER,games INTEGER,PRIMARY KEY(week,pos))')]);
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_winners(week INTEGER,pos INTEGER,user_id INTEGER,name TEXT,prize_c INTEGER,games INTEGER,PRIMARY KEY(week,pos))'),
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS account_imgs(bank TEXT PRIMARY KEY,data TEXT,ts INTEGER)')]); // deposit account pictures (kept out of settings so the hot settings read stays small)
   try { await env.DB.prepare('SELECT auto_off FROM users LIMIT 1').first() } catch (e) { try { await env.DB.prepare('ALTER TABLE users ADD COLUMN auto_off INTEGER DEFAULT 0').run() } catch (e2) { } }
   tablesReady = true };
 const cfg = { t: 0, set: {}, bans: new Set() }; // settings and bans are cached for 5 seconds to keep requests fast
@@ -304,7 +315,12 @@ async function settle(env, r, picks, w, now) { // pays the winners and ends the 
     // weekly ranking: every player of this round gets +1 game (only while the round is still 'running', so it can never count twice)
     db.prepare("INSERT INTO wk_games(week,user_id,games) SELECT ?2,user_id,1 FROM(SELECT DISTINCT user_id FROM picks WHERE round_id=?1) WHERE EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running') ON CONFLICT(week,user_id) DO UPDATE SET games=games+1").bind(r.id, weekStart(now)),
     db.prepare("UPDATE rounds SET status='ended',ended_ts=?2,called_n=?3,winners=?4 WHERE id=?1 AND status='running'").bind(r.id, now, w.k, JSON.stringify(w.picks.map(p => p.cartela)))]);
-  return res[res.length - 1].meta.changes > 0;
+  const done = res[res.length - 1].meta.changes > 0;
+  if (done) { // only the request that really ended the round gets here, so every winner receives the message exactly once
+    const per = new Map(); for (const p of w.picks) per.set(p.user_id, (per.get(p.user_id) || 0) + share); // a player with two winning cartelas gets one message with the total
+    await Promise.all([...per].map(([id, c]) => tg(env, 'sendMessage', { chat_id: id, text: `ዙር ${r.id} አሸናፊ ሆነዋል ብር = ${B(c)}` })));
+  }
+  return done;
 }
 async function advance(env) {
   const db = env.DB, now = Date.now(); let r = await latest(db);
@@ -493,12 +509,13 @@ async function onPlayerCb(env, q, parts) { // menu / bank / cancel buttons
   if (a === 'b') {
     if (parts[1] === 'x') { await clearState(env, uid); return sendMenu(env, uid, '❌ ተሰርዟል።') }
     const flow = parts[1], bank = parts[2], st = await getState(env, uid);
-    if (!BANKS[bank] || (bank === 'cbe' && !env.CBE_ACCOUNT)) return;
+    if (!BANKS[bank] || (bank === 'cbe' && !cbeOn())) return;
     if (flow === 'd') {
       if (!st || st.step !== 'dep_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «ገንዘብ አስገባ» ን እንደገና ይጫኑ።');
       await setState(env, uid, 'dep_paste', { amt: st.amt, method: bank });
       const dtxt = `የሚያጋጥማቹ የክፍያ ችግር:\n${SUPPORT} ላይ ፃፉልን።\n\n1. ከታች ባለው አካውንት ${st.amt} ብር ያስገቡ\n${acctText(env, bank)}\n\n2. የከፈሉበትን አጭር የጽሁፍ መልዕክት (SMS) ኮፒ በማድረግ እዚህ ላይ ፔስት (Paste) አድርገው ያስገቡና ይላኩት 👇👇👇\n\n⚠️ መልዕክቱን ሙሉ በሙሉ ያለምንም ለውጥ ይላኩ (የግብይት ቁጥሩን ጨምሮ)።`;
-      const kc = copyKb(env, bank, st.amt), rr = kc ? await tg(env, 'sendMessage', { chat_id: uid, text: dtxt, reply_markup: kc }) : null;
+      const kc = copyKb(env, bank, st.amt), im = await env.DB.prepare('SELECT data FROM account_imgs WHERE bank=?').bind(bank).first().catch(() => null); // if the admin saved a picture for this account it is sent with the instructions
+      let rr = im && dtxt.length <= 1000 ? await sendPhotoData(env, uid, im.data, dtxt, kc) : null; if (!(rr && rr.ok)) rr = kc ? await tg(env, 'sendMessage', { chat_id: uid, text: dtxt, reply_markup: kc }) : null;
       return rr && rr.ok ? rr : sendTo(env, uid, dtxt);
     }
     if (flow === 'w') {
@@ -561,7 +578,7 @@ async function onStep(env, u, st, text) { // the player typed something while in
 }
 
 async function onTelegram(env, up) {
-  const db = env.DB; await ensureTables(env);
+  const db = env.DB; await ensureTables(env); await loadAcc(env);
   if (up.callback_query) {
     const q = up.callback_query, parts = String(q.data).split(':'), [a, id] = parts;
     if (a === 'm' || a === 'b') return onPlayerCb(env, q, parts);
@@ -782,6 +799,25 @@ async function adminRoute(req, env, url) {
     await setSet(env, 'bonus', JSON.stringify({ on: false })); await log('clear bonus', ''); await poke(env);
     return J({ ok: true });
   }
+  if (name === 'accounts') return J({ items: await accountsFor(env, url, true), cbe_on: cbeOn() }); // deposit accounts shown to players (Admin > Accounts)
+  if (name === 'set-account') {
+    const bank = String(b.bank || ''), number = String(b.number ?? '').replace(/[\u0000-\u001f]/g, '').trim(), nm = String(b.name ?? '').replace(/[\u0000-\u001f]/g, '').trim();
+    if (!Object.keys(BANKS).includes(bank) || number.length < 4 || number.length > 30 || nm.length < 2 || nm.length > 40) return J({ error: 'bad_input' }, 400);
+    const raw = await db.prepare("SELECT v FROM settings WHERE k='accounts'").first(); let cur = {}; try { cur = (raw && JSON.parse(raw.v)) || {} } catch (e) { }
+    cur[bank] = { a: number, h: nm }; await setSet(env, 'accounts', JSON.stringify(cur)); await log('set account', bank + ' ' + number + ' ' + nm);
+    return J({ ok: true });
+  }
+  if (name === 'set-account-image') {
+    const bank = String(b.bank || ''), data = String(b.data || '');
+    if (!Object.keys(BANKS).includes(bank) || !/^data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/.test(data) || data.length > 400000) return J({ error: 'bad_image' }, 400);
+    await db.prepare('INSERT INTO account_imgs(bank,data,ts) VALUES(?1,?2,?3) ON CONFLICT(bank) DO UPDATE SET data=?2,ts=?3').bind(bank, data, Date.now()).run(); await log('set account picture', bank);
+    return J({ ok: true });
+  }
+  if (name === 'clear-account-image') {
+    const bank = String(b.bank || ''); if (!Object.keys(BANKS).includes(bank)) return J({ error: 'bad_input' }, 400);
+    await db.prepare('DELETE FROM account_imgs WHERE bank=?').bind(bank).run(); await log('remove account picture', bank);
+    return J({ ok: true });
+  }
   if (name === 'game' || name === 'game-start' || name === 'game-stop') {
     if (!env.HUB) return noHub();
     const hub = hubOf(env); let r = await hub.current();
@@ -808,6 +844,11 @@ async function route(req, env, url) {
     await tryMatch(env, s.txid); return J({ ok: true, parsed: true, bank: s.bank });
   }
   if (p === '/tg/' + env.TG_SECRET && req.method === 'POST') { await onTelegram(env, await req.json()); return J({ ok: true }) }
+  if (p.startsWith('/acc/') && req.method === 'GET') { // account pictures (public: they only show the account players pay into)
+    const k = p.slice(5).replace(/\.jpg$/, ''); if (!Object.keys(BANKS).includes(k)) return J({ error: 'not_found' }, 404);
+    await ensureTables(env); const r = await db.prepare('SELECT data FROM account_imgs WHERE bank=?').bind(k).first(); if (!r) return J({ error: 'not_found' }, 404);
+    return new Response(Uint8Array.from(atob(r.data.split(',')[1]), c => c.charCodeAt(0)), { headers: { 'content-type': 'image/jpeg', 'cache-control': 'public, max-age=300' } });
+  }
   if (!p.startsWith('/api/')) return J({ error: 'not_found' }, 404);
   if (p.startsWith('/api/admin/')) return adminRoute(req, env, url);
   const tu = await verifyInit(req.headers.get('x-init-data'), env.BOT_TOKEN); if (!tu) return J({ error: 'unauthorized' }, 401);
@@ -819,7 +860,7 @@ async function route(req, env, url) {
   const b = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
   const need = () => u.phone ? null : J({ error: 'not_registered' }, 403);
   if (p !== '/api/me' && await isBanned(env, u.id)) return J({ error: 'banned' }, 403);
-  if (p === '/api/me') { const dep = (await db.prepare('SELECT amount_c,status,ts FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results, wd = (await db.prepare('SELECT amount_c,status,ts FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results; return J({ id: u.id, name: u.name, phone: u.phone, registered: !!u.phone, balance: B(u.balance), bonus: B(u.bonus_c), deposits: dep.map(x => ({ ...x, amount: B(x.amount_c) })), withdrawals: wd.map(x => ({ ...x, amount: B(x.amount_c) })) }) }
+  if (p === '/api/me') { const dep = (await db.prepare('SELECT amount_c,status,ts FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results, wd = (await db.prepare('SELECT amount_c,status,ts FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results; const accounts = url.searchParams.get('acc') ? await accountsFor(env, url, false) : undefined; return J({ accounts, id: u.id, name: u.name, phone: u.phone, registered: !!u.phone, balance: B(u.balance), bonus: B(u.bonus_c), deposits: dep.map(x => ({ ...x, amount: B(x.amount_c) })), withdrawals: wd.map(x => ({ ...x, amount: B(x.amount_c) })) }) }
   if (p === '/api/register') { if (u.phone) return J({ error: 'already_registered' }, 409); const ph = normPhone(b.phone), nm = String(b.name || '').trim().slice(0, 30); if (!ph || nm.length < 2) return J({ error: 'bad_input' }, 400);
     try { const rr = await db.prepare("UPDATE users SET name=?1,phone=?2,balance=balance+?3 WHERE id=?4 AND (phone IS NULL OR phone='')").bind(nm, ph, welcomeC(env), u.id).run(); if (!rr.meta.changes) return J({ error: 'already_registered' }, 409) } catch (e) { return J({ error: 'phone_used' }, 409) }
     if (welcomeC(env) > 0) await say(env, u.id, `🎉 እንኳን ደስ አለዎት! በተሳካ ሁኔታ ተመዝግበዋል። ${B(welcomeC(env))} ብር ወደ ዋሌትዎ ተጨምሯል።`, playKb(env));
