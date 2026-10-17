@@ -376,8 +376,10 @@ async function advance(env) {
   }
   if (r && r.status === 'lobby' && now - r.start_ts < LOBBY_MS) { try { await autoTake(env, r) } catch (e) { } } // admin auto-take for the support account
   if (r.status === 'lobby' && now - r.start_ts >= LOBBY_MS) {
-    const n = (await db.prepare('SELECT COUNT(DISTINCT user_id) n FROM picks WHERE round_id=?').bind(r.id).first()).n;
-    if (n < 2) await refundAndClose(env, r, 'lobby', now); // a game needs at least 2 players
+    let at = {}; try { at = JSON.parse(await getSet(env, 'autotake') || '{}') || {} } catch (e) { }
+    const pc = await db.prepare('SELECT COUNT(DISTINCT user_id) n,COALESCE(SUM(CASE WHEN user_id=?2 THEN 1 ELSE 0 END),0) s FROM picks WHERE round_id=?1').bind(r.id, Number(at.uid) || 0).first();
+    const solo = !!(at.on && at.uid > 0 && pc.n === 1 && pc.s > 0); // AutoTake ON: the support account's cartelas may play alone, round after round, until it is switched OFF
+    if (pc.n < 2 && !solo) await refundAndClose(env, r, 'lobby', now); // otherwise a game needs at least 2 players
     else await db.prepare("UPDATE rounds SET status='running' WHERE id=?1 AND status='lobby'").bind(r.id).run();
     r = await db.prepare('SELECT * FROM rounds WHERE id=?').bind(r.id).first();
   }
