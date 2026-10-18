@@ -1,11 +1,12 @@
 // Aman Bingo server — Cloudflare Worker + D1 database + one Durable Object (GameHub) that runs the live game.
 // Money is stored in cents (birr x 100). Variables to set in Cloudflare:
 //   BOT_TOKEN, ADMIN_TG_ID, SMS_SECRET, TG_SECRET, ADMIN_KEY (secrets) · GAME_URL, ALLOW_ORIGIN, STAKE (plain variables)
-//   Optional: CBE_ACCOUNT (e.g. "1000123456789 (AMANUEL YISMAH)" — the CBE button appears only when this is set), BOT_USERNAME, WELCOME_BONUS, DAILY_BONUS, ADMIN_URL, PROMO_PHOTO
+//   Optional: BOT_USERNAME, WELCOME_BONUS, DAILY_BONUS, ADMIN_URL, PROMO_PHOTO
 // wrangler.json needs the HUB binding + migration for GameHub (see the two blocks given with this file).
-// Deposit verification: the player pastes the bank SMS in the bot. The Worker reads the amount + transaction number (Telebirr, Dashen, BOA, CBE)
+// DEPOSIT BANKS (bot + game wallet + withdrawals): Telebirr, BOA, M-Pesa, E-birr. The admin edits the numbers, names and pictures in Admin > Accounts.
+// Deposit verification: the player pastes the payment SMS in the bot. The Worker reads the amount + transaction number (Telebirr, Dashen, BOA, CBE formats)
 // and credits the balance automatically when the SAME SMS was forwarded to POST /sms by the SMS-forwarder app on the receiving phone.
-// If that SMS has not arrived yet, the deposit waits (and is also sent to the admins) and is credited the moment the SMS arrives.
+// If that SMS has not arrived yet (or the bank is M-Pesa / E-birr, whose SMS format is not read yet), the deposit waits, is sent to the admins, and is credited when the admin approves (or the matching SMS arrives).
 // SECRET BONUS: the admin chooses cartela numbers for one round (Admin > Bonus). The player who takes one of them wins the bonus at once and is announced to everybody.
 // In a bonus round every taken cartela is locked (nobody can drop or change it), and the secret cartela numbers are never sent to the phones.
 // WEEKLY TOP PLAYERS: players are ranked by games played in the week (Monday 00:00 - Sunday 24:00 Ethiopia time). The admin sets the prizes (Admin > Weekly) and pays last week's winners with one button.
@@ -15,6 +16,7 @@
 // ACCOUNTS: the admin edits the deposit accounts (number, name, picture) in Admin > Accounts; the bot and the game wallet use them at once.
 // WINNER MESSAGE: when a round ends, every winner gets a bot message "ዙር <round> አሸናፊ ሆነዋል ብር = <prize>" (sent once, from settle()).
 // AUTO-TAKE: Admin > AutoTake switches on automatic taking of N random cartelas every round for the support account; a win pays the support account (see autoTake() below).
+// RELIABILITY: a short database hiccup while taking / dropping a cartela is retried once (retryDb) so players do not see "server problem".
 import { DurableObject } from 'cloudflare:workers';
 const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 600, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
@@ -56,6 +58,7 @@ const FT = s => String(s).toUpperCase().slice(0, 12); // bank references (FT…)
 //  Dashen 1: "You have received ETB 6,000.00 from NAME on 2026-09-29 at 09:48:09 with transaction reference: 112WDTS262720002." (has a reference number)
 //  Dashen 2: "… credited with ETB 40.00 … on 05/10/2026 at 11:24:14 PM. Your current balance is ETB 303.20." (no reference number, so the id is built from date + time + balance)
 //  CBE:      "… Credited with ETB … Ref No FT26283XXXXX …" (format not tested with a real sample yet)
+//  M-Pesa / E-birr: no reader yet (send a real SMS from each to add one); until then those deposits are approved by the admin.
 export function parseBank(t) {
   t = String(t || '');
   let a, i, m;
@@ -137,22 +140,20 @@ const askContact = (env, uid) => sendTo(env, uid, '👋 እንኳን ወደ አ�
 const instructionText = `📖 እንዴት ይጫወታሉ?\n\n1️⃣ «ገንዘብ አስገባ» ን ተጭነው ገንዘብ ያስገቡ (ቢያንስ ${MIN_DEP} ብር)።\n2️⃣ «ተጫወት» ን ተጭነው ጨዋታውን ይክፈቱ።\n3️⃣ ከ1 እስከ ${TOTAL} ካርቴላ ይምረጡ — እስከ ${MAXC} ካርቴላ መያዝ ይቻላል።\n4️⃣ ቁጥሮች ሲጠሩ ካርዱ ላይ ምልክት ይደረጋል። መስመር (ወደጎን፣ ወደታች ወይም ዲያጎናል) የሞላ ካርቴላ ያሸንፋል።\n5️⃣ አሸናፊው ከጠቅላላው ድርሻ ${Math.round(CUT * 100)}% ያገኛል። ጨዋታ ለመጀመር ቢያንስ 2 ተጫዋች ያስፈልጋል።\n6️⃣ ለማውጣት «አውጣ» ን ይጫኑ (ቢያንስ ${MIN_WD} ብር)።\n\nጥያቄ ካለዎት: ${SUPPORT}`;
 const KBNOTE = '⌨️ አዲስ! ከታች ያሉትን ቁልፎች (ጨዋታ ተጫወት፣ ገንዘብ አስገባ፣ ቀሪ ሂሳብ) መጠቀም ይችላሉ።';
 
-// banks offered in the deposit / withdraw flows (the CBE button shows only when CBE_ACCOUNT is set)
-const BANKS = { telebirr: 'TELEBIRR', cbe: 'CBE BIRR', boa: 'BOA', dashen: 'DASHEN' };
-const BANK_DEF = { telebirr: { a: '0958828304', h: 'AMANUEL' }, boa: { a: '266199511', h: 'AMANUEL YISMAH' }, dashen: { a: '5901914597011', h: 'AMANUEL YISMAH' }, cbe: { a: '', h: '' } }; // used until the admin saves an account (Admin > Accounts)
+// banks offered in the deposit / withdraw flows
+const BANKS = { telebirr: 'TELEBIRR', boa: 'BOA', mpesa: 'M-PESA', ebirr: 'E-BIRR' };
+const BANK_DEF = { telebirr: { a: '0958828304', h: 'AMANUEL' }, boa: { a: '266199511', h: 'AMANUEL YISMAH' }, mpesa: { a: '0706577754', h: 'AMANUEL' }, ebirr: { a: '0958828304', h: 'AMANUEL' } }; // used until the admin saves an account (Admin > Accounts)
 let ACC = { ...BANK_DEF }; // the accounts players pay into; refreshed from the database at the start of every bot update (loadAcc)
-const cbeEnv = env => { const t = String(env.CBE_ACCOUNT || ''), m = t.match(/\d{6,}/); return m ? { a: m[0], h: (t.match(/\(([^)]*)\)/) || [])[1] || '' } : { a: '', h: '' } };
-async function loadAcc(env) { let s = {}; try { s = JSON.parse(await getSet(env, 'accounts') || '{}') || {} } catch (e) { } const o = {}; for (const k of Object.keys(BANKS)) { const v = s[k]; o[k] = v && v.a ? { a: String(v.a), h: String(v.h || '') } : k === 'cbe' ? cbeEnv(env) : { ...BANK_DEF[k] } } return ACC = o }
-const cbeOn = () => !!ACC.cbe.a; // the CBE button shows only when a CBE account exists (saved by the admin, or CBE_ACCOUNT)
+async function loadAcc(env) { let s = {}; try { s = JSON.parse(await getSet(env, 'accounts') || '{}') || {} } catch (e) { } const o = {}; for (const k of Object.keys(BANKS)) { const v = s[k]; o[k] = v && v.a ? { a: String(v.a), h: String(v.h || '') } : { ...BANK_DEF[k] } } return ACC = o }
 async function accountsFor(env, url, all) { await loadAcc(env); const im = {}; try { for (const r of (await env.DB.prepare('SELECT bank,ts FROM account_imgs').all()).results) im[r.bank] = r.ts } catch (e) { } const o = {}; for (const k of Object.keys(BANKS)) if (all || ACC[k].a) o[k] = { a: ACC[k].a, h: ACC[k].h, img: im[k] ? `${url.origin}/acc/${k}.jpg?v=${im[k]}` : '' }; return o }
-const banksFor = env => Object.keys(BANKS).filter(k => k !== 'cbe' || cbeOn());
+const banksFor = env => Object.keys(BANKS);
 const bankKb = (env, flow) => {
   const b = banksFor(env).map(k => ({ text: BANKS[k], callback_data: `b:${flow}:${k}` })), rows = [];
   for (let i = 0; i < b.length; i += 2) rows.push(b.slice(i, i + 2));
   rows.push([{ text: '❌ ሰርዝ', callback_data: 'b:x' }]);
   return { inline_keyboard: rows };
 };
-const acctText = (env, k) => { const x = ACC[k] || { a: '', h: '' }; return (k === 'telebirr' ? '📱 ቴሌብር: ' : k === 'boa' ? '🏦 አቢሲኒያ ባንክ (BOA): ' : k === 'dashen' ? '🏦 ዳሽን ባንክ: ' : '🏦 ንግድ ባንክ (CBE): ') + x.a + (x.h ? '\n👤 ስም: ' + x.h : '') };
+const acctText = (env, k) => { const x = ACC[k] || { a: '', h: '' }; return (k === 'telebirr' ? '📱 ቴሌብር: ' : k === 'boa' ? '🏦 አቢሲኒያ ባንክ (BOA): ' : k === 'mpesa' ? '📱 ኤም-ፔሳ (M-Pesa): ' : '📱 ኢ-ብር (E-birr): ') + x.a + (x.h ? '\n👤 ስም: ' + x.h : '') };
 // plain account number of a bank (used by the copy button)
 const acctNo = (env, k) => (ACC[k] && ACC[k].a) || '';
 // sends a photo from the saved picture (data URL) with a caption and optional inline buttons
@@ -556,7 +557,7 @@ async function onPlayerCb(env, q, parts) { // menu / bank / cancel buttons
   if (a === 'b') {
     if (parts[1] === 'x') { await clearState(env, uid); return sendMenu(env, uid, '❌ ተሰርዟል።') }
     const flow = parts[1], bank = parts[2], st = await getState(env, uid);
-    if (!BANKS[bank] || (bank === 'cbe' && !cbeOn())) return;
+    if (!BANKS[bank]) return;
     if (flow === 'd') {
       if (!st || st.step !== 'dep_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «ገንዘብ አስገባ» ን እንደገና ይጫኑ።');
       await setState(env, uid, 'dep_paste', { amt: st.amt, method: bank });
@@ -585,7 +586,8 @@ async function onStep(env, u, st, text) { // the player typed something while in
     if (!pr) return sendTo(env, uid, '⚠️ የግብይት ቁጥር አልተገኘም። የከፈሉበትን ሙሉ መልዕክት እንደገና ኮፒ አድርገው ፔስት ያድርጉ።');
     const amt = pr.amount_c ? B(pr.amount_c) : st.amt; // the amount written in the bank SMS is the real money, so it wins over the typed amount
     if (amt < MIN_DEP) return sendTo(env, uid, `⚠️ ማስገባት የሚችሉት ከ ${MIN_DEP} ብር ጀምሮ ነው። በመልዕክቱ ላይ ያለው መጠን ${amt} ብር ነው።`);
-    const r = await makeDeposit(env, u, amt, pr.txid, pr.bank || st.method);
+    const method = st.method === 'mpesa' || st.method === 'ebirr' ? st.method : (pr.bank || st.method); // M-Pesa / E-birr are recorded as chosen by the player
+    const r = await makeDeposit(env, u, amt, pr.txid, method);
     if (r.error === 'too_many_pending') { await clearState(env, uid); return sendMenu(env, uid, '⚠️ ብዙ ያልተረጋገጡ የገቢ ጥያቄዎች አሉዎት። እስኪረጋገጡ ይጠብቁ ወይም ' + SUPPORT + ' ያነጋግሩ።') }
     if (r.error) return sendTo(env, uid, '⚠️ ይህ የግብይት ቁጥር ከዚህ በፊት ተመዝግቧል። ሌላ መልዕክት ያስገቡ።');
     await clearState(env, uid);
@@ -847,7 +849,7 @@ async function adminRoute(req, env, url) {
     await setSet(env, 'bonus', JSON.stringify({ on: false })); await log('clear bonus', ''); await poke(env);
     return J({ ok: true });
   }
-  if (name === 'accounts') return J({ items: await accountsFor(env, url, true), cbe_on: cbeOn() }); // deposit accounts shown to players (Admin > Accounts)
+  if (name === 'accounts') return J({ items: await accountsFor(env, url, true) }); // deposit accounts shown to players (Admin > Accounts)
   if (name === 'set-account') {
     const bank = String(b.bank || ''), number = String(b.number ?? '').replace(/[\u0000-\u001f]/g, '').trim(), nm = String(b.name ?? '').replace(/[\u0000-\u001f]/g, '').trim();
     if (!Object.keys(BANKS).includes(bank) || number.length < 4 || number.length > 30 || nm.length < 2 || nm.length > 40) return J({ error: 'bad_input' }, 400);
@@ -900,6 +902,8 @@ async function adminRoute(req, env, url) {
 
 /* ---------- HTTP routes ---------- */
 const errOf = e => /CHECK/.test(e.message) ? 'insufficient_balance' : /UNIQUE|PRIMARY/.test(e.message) ? 'taken' : 'server_error';
+// runs a database action; if it fails for a temporary reason (not "not enough balance" and not "already taken") it waits a moment and tries once more
+const retryDb = async fn => { try { return await fn() } catch (e) { if (errOf(e) !== 'server_error') throw e; await new Promise(r => setTimeout(r, 200)); return await fn() } };
 async function route(req, env, url) {
   const p = url.pathname, db = env.DB, now = Date.now();
   if (p === '/') return J({ ok: true });
@@ -959,13 +963,13 @@ async function route(req, env, url) {
     if (p === '/api/unpick' && bcf) return J({ error: 'locked' }, 409); // bonus round: a taken cartela can never be dropped or changed
     try {
       if (p === '/api/pick') {
-        const res = await db.batch([
+        const res = await retryDb(() => db.batch([
           db.prepare("INSERT INTO picks(round_id,cartela,user_id,bonus_c) SELECT ?1,?2,?3,MIN(?5,(SELECT bonus_c FROM users WHERE id=?3)) WHERE (SELECT COUNT(*) FROM picks WHERE round_id=?1 AND user_id=?3)<?4 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id, MAXC, r.stake_c),
-          db.prepare("UPDATE users SET bonus_c=bonus_c-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3),balance=balance-(?4-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)) WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)").bind(r.id, no, u.id, r.stake_c)]);
+          db.prepare("UPDATE users SET bonus_c=bonus_c-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3),balance=balance-(?4-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)) WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)").bind(r.id, no, u.id, r.stake_c)]));
         if (res[0].meta.changes === 0) return J({ error: 'max_cards', max: MAXC }, 409);
-      } else await db.batch([
+      } else await retryDb(() => db.batch([
         db.prepare("UPDATE users SET bonus_c=MIN(?5,bonus_c+(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)),balance=balance+(?4-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)) WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3) AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id, r.stake_c, bonusC(env)),
-        db.prepare("DELETE FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id)]);
+        db.prepare("DELETE FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id)]));
     } catch (e) { return J({ error: errOf(e) }, 409) }
     // The pick above succeeded, so the stake was paid. Only now can a bonus cartela win — a player without enough balance never gets here, so no bonus is shown for them.
     let won = null;
@@ -979,7 +983,7 @@ async function route(req, env, url) {
     return J(st);
   }
   if (p === '/api/deposit') {
-    const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = ['telebirr', 'cbe', 'boa', 'dashen'].includes(b.method) ? b.method : 'telebirr';
+    const amt = Number(b.amount), txid = String(b.txid || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), method = Object.keys(BANKS).includes(b.method) ? b.method : 'telebirr';
     if (!(amt >= MIN_DEP) || txid.length < 8 || txid.length > 24) return J({ error: 'bad_input', min: MIN_DEP }, 400);
     const r = await makeDeposit(env, u, amt, txid, method); if (r.error) return J({ error: r.error }, 409);
     return J({ status: r.status, balance: B((await db.prepare('SELECT balance FROM users WHERE id=?').bind(u.id).first()).balance) });

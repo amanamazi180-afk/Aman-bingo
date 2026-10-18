@@ -140,7 +140,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
     <div class="pbs pb2"><div><span>ቦነስ</span><b>10 ብር የእንኳን ደህና መጡ ቦነስ</b><small>አዲስ ሲመዘገቡ ወዲያው ያገኛሉ</small></div><em>🎁</em></div>
     <div class="pbs pb3"><div><span>ሳምንታዊ ስጦታ</span><b>ከ1 እስከ 10 ደረጃ ሽልማት</b><small>በሳምንቱ ከፍተኛ ደረጃ የያዙ ይሸለማሉ</small></div><em>🏆</em></div>
     <div class="pbs pb4"><div><span>ዕለታዊ ስጦታ</span><b>በየቀኑ ስጦታ ለዕድለኞች</b><small>በየቀኑ ይጫወቱ፣ ስጦታ ያሸንፉ</small></div><em>🎉</em></div>
-    <div class="pbs pb5"><div><span>ፈጣን ገቢ</span><b>ፈጣን ተቀማጭ ገንዘብ</b><small>ቴሌብር፣ ሲቢኢ፣ ዳሽን እና አቢሲኒያ</small></div><em>⚡</em></div>
+    <div class="pbs pb5"><div><span>ፈጣን ገቢ</span><b>ፈጣን ተቀማጭ ገንዘብ</b><small>ቴሌብር፣ አቢሲኒያ፣ ኤም-ፔሳ እና ኢ-ብር</small></div><em>⚡</em></div>
     <div class="pbs pb6"><div><span>ፈጣን ወጪ</span><b>ያሸነፉትን ወዲያው ያውጡ</b><small>ፈጣን እና አስተማማኝ ወጪ</small></div><em>💰</em></div>
   </div><div class="pbd" id="pbd"></div></div>
   <div class="mid"><div class="logo">አማን <i>BINGO</i></div><div class="bar" style="margin:0 auto"><div></div></div><p>ዋጋ <b id="hs">10</b> ብር · እስከ 2 ካርቴላ ይምረጡ</p><p id="hreg" style="color:var(--or);font-weight:700"></p></div>
@@ -189,8 +189,9 @@ const API=location.hostname.endsWith("github.io")?"https://aman-bingo.amanamazi1
 const tg=window.Telegram&&Telegram.WebApp;if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#0a1224");tg.setBackgroundColor("#0a1224")}catch(e){}try{if(tg.disableVerticalSwipes)tg.disableVerticalSwipes()}catch(e){}}
 const $=i=>document.getElementById(i),CL=["#3b82f6","#06b6d4","#22c55e","#f5b73b","#ef4444"];
 const L=n=>"BINGO"[Math.floor((n-1)/15)],F=n=>String(+Number(n).toFixed(2));
-const PAY={telebirr:{n:"Telebirr",a:"0958828304",h:"AMANUEL"},cbe:{n:"CBE",a:"0958828304",h:"AMANUEL YISMAH"},boa:{n:"BOA",a:"266199511",h:"AMANUEL YISMAH"},dashen:{n:"Dashen Bank",a:"5901914597011",h:"AMANUEL YISMAH"}};
-const LG={telebirr:["#0a8fd8","T"],boa:["#c9a227","B"],dashen:["#1b4fa3","D"],cbe:["#7b2a7e","C"]};
+/* deposit banks: Telebirr, BOA, M-Pesa, E-birr (the real numbers come from the server: Admin > Accounts; these are only the first-load defaults) */
+const PAY={telebirr:{n:"Telebirr",a:"0958828304",h:"AMANUEL"},boa:{n:"BOA",a:"266199511",h:"AMANUEL YISMAH"},mpesa:{n:"M-Pesa",a:"0706577754",h:"AMANUEL"},ebirr:{n:"E-birr",a:"0958828304",h:"AMANUEL"}};
+const LG={telebirr:["#0a8fd8","T"],boa:["#c9a227","B"],mpesa:["#16a34a","M"],ebirr:["#16a34a","E"]};
 const ERR={no_api:"የሰርቨር አድራሻ አልተቀመጠም (index.html API መስመር)",not_registered:"እባክዎ መጀመሪያ በቦቱ ይመዝገቡ (ስልክ ቁጥርዎን ያጋሩ)",insufficient_balance:"በቂ ሒሳብ የለዎትም - መጀመሪያ ገቢ ያድርጉ",round_closed:"ዙሩ ጀምሯል",max_cards:"ከ2 ካርቴላ በላይ መያዝ አይችሉም",taken:"ካርቴላው ተይዟል",bad_input:"ያስገቡትን ቁጥሮች ያረጋግጡ",too_many_pending:"በመጠባበቅ ላይ ብዙ የገቢ ጥያቄዎች አሉዎት። እስኪረጋገጡ ይጠብቁ።",txid_used:"ይህ የግብይት ቁጥር ቀድሞ ጥቅም ላይ ውሏል",deposit_required:"ወጪ ከማድረግዎ በፊት ገቢ ያድርጉ",withdraw_pending:"በመጠባበቅ ላይ ያለ የወጪ ጥያቄ አለዎት። እስኪፈቀድ ይጠብቁ።",unauthorized:"ጨዋታውን ከቴሌግራም ቦት ይክፈቱ",server_error:"የሰርቨር ችግር፣ እንደገና ይሞክሩ",banned:"አካውንትዎ ታግዷል። ድጋፍን ያነጋግሩ።",paused:"ጨዋታው ለጊዜው ቆሟል",locked:"🔒 ይህ ዙር ተቆልፏል፦ የያዙትን ካርቴላ መቀየር አይቻልም"};
 let ready=false,S=null,off=0,inGame=false,looping=false,snd_on=true,lastN=0,rid=0,key="",reg=false,pend=0,gkey="";
 /* SHS = the called numbers that are SHOWN on screen. A number is shown at the exact moment its voice starts, so the screen and the voice are always in sync. */
@@ -200,7 +201,26 @@ function setNav(i){document.querySelectorAll("#gnav div").forEach((d,k)=>d.class
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let _t;function toast(m,ok){const t=$("toast");t.textContent=m;t.style.background=ok?"var(--gr)":"var(--rd)";t.style.color=ok?"var(--dk)":"#fff";t.style.display="block";clearTimeout(_t);_t=setTimeout(()=>t.style.display="none",ok?5000:2600)}
 function initData(){let d=tg&&tg.initData||"";if(!d){try{d=new URLSearchParams(location.hash.slice(1)).get("tgWebAppData")||""}catch(e){}}return d}
-async function api(p,b){if(API.indexOf("PASTE_")===0)throw"no_api";const c=new AbortController(),to=setTimeout(()=>c.abort(),10000);try{const r=await fetch(API+p,{method:b?"POST":"GET",headers:{"content-type":"application/json","x-init-data":initData()},body:b?JSON.stringify(b):undefined,signal:c.signal});const d=await r.json().catch(()=>({}));if(!r.ok)throw d.error||"server_error";return d}catch(e){throw e&&e.name==="AbortError"?"server_error":e}finally{clearTimeout(to)}}
+/* api(): reading requests (GET) are tried up to 3 times when the server or the network has a short hiccup, so one failed request never shows "server problem".
+   Writing requests (POST: pick, deposit, withdraw ...) are sent once here; pick() below checks the real state and retries safely. */
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function api(p,b){
+  if(API.indexOf("PASTE_")===0)throw"no_api";
+  const tries=b?1:3;
+  for(let a=0;a<tries;a++){
+    const c=new AbortController(),to=setTimeout(()=>c.abort(),10000);
+    try{
+      const r=await fetch(API+p,{method:b?"POST":"GET",headers:{"content-type":"application/json","x-init-data":initData()},body:b?JSON.stringify(b):undefined,signal:c.signal});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw d.error||"server_error";
+      return d;
+    }catch(e){
+      const er=typeof e==="string"?e:"server_error"; /* network failure, timeout or any unexpected error = "server_error" */
+      if(er==="server_error"&&a<tries-1){await sleep(600*(a+1));continue}
+      throw er;
+    }finally{clearTimeout(to)}
+  }
+}
 
 /* card helpers (same generator as the server) */
 function mk(no){let s=no*7919+13;const r=()=>(s=(s*1664525+1013904223)%4294967296)/4294967296,cols=[];for(let c=0;c<5;c++){const p=Array.from({length:15},(_,i)=>c*15+i+1),o=[];for(let i=0;i<5;i++)o.push(p.splice(Math.floor(r()*p.length),1)[0]);cols.push(o)}cols[2][2]=0;return cols}
@@ -331,7 +351,17 @@ async function pick(n){
     if(s.bonus_won)toast("🎉 እንኳን ደስ አለዎት! "+F(s.bonus_won)+" ብር ቦነስ አሸንፈዋል!",1);
     if(pend===1){S=s;key="";render()}
     if(tg&&tg.HapticFeedback)tg.HapticFeedback.selectionChanged()}
-  catch(e){if(pend===1){S.mine=bk[0];S.taken=bk[1];key="";drawLobby()}toast(ERR[e]||e)}
+  catch(e){
+    /* a short server / network hiccup: first look at what the server really has. If the pick already went through, nothing is shown; if not, it is sent once more. */
+    if(e==="server_error"){
+      try{
+        const s2=await api("/api/state");
+        if(s2.mine.includes(n)===!had){if(pend===1){S=s2;key="";render()}return}
+        const s3=await api(had?"/api/unpick":"/api/pick",{cartela:n});
+        if(pend===1){S=s3;key="";render()}return
+      }catch(x){e=x}
+    }
+    if(pend===1){S.mine=bk[0];S.taken=bk[1];key="";drawLobby()}toast(ERR[e]||e)}
   finally{pend--;if(pend===0)tick()}
 }
 function buildBoard(){let h="";[..."BINGO"].forEach((l,i)=>h+=`<div class="hd" style="background:${CL[i]}">${l}</div>`);for(let r=1;r<=15;r++)for(let c=0;c<5;c++){const n=c*15+r;h+=`<div class="nn" id="b${n}">${n}</div>`}$("board").innerHTML=h}
@@ -380,18 +410,19 @@ function leaveGame(){inGame=false;$("win").classList.remove("on");goHome()}
 /* wallet */
 const SL=x=>({pending:"በመጠባበቅ ላይ",paid:"ተፈቅዷል",approved:"ተፈቅዷል",rejected:"ውድቅ ተደርጓል"}[x]||x),SC=x=>x==="paid"||x==="approved"?"#22c55e":x==="rejected"?"#ef4444":"#f5b73b";
 const hrows=me=>[...me.deposits.filter(x=>x.status==="approved").map(x=>["Deposit",x]),...me.withdrawals.map(x=>["Withdraw",x])].map(([t,x])=>t==="Deposit"?`<div class="li"><span>ገቢ ${F(x.amount)}</span><span></span></div>`:`<div class="li"><span>ወጪ ${F(x.amount)}</span><span style="color:${SC(x.status)}">${SL(x.status)}</span></div>`).join("");
-let sel="telebirr",wsel="telebirr",pendW=false;const WM={telebirr:"Telebirr",boa:"BOA",dashen:"Dashen Bank",cbe:"CBE"};
-/* bank logos: put logo-telebirr.jpg, logo-cbe.jpg, logo-boa.jpg, logo-dashen.jpg next to index.html; until then a coloured letter is shown */
+let sel="telebirr",wsel="telebirr",pendW=false;const WM={telebirr:"Telebirr",boa:"BOA",mpesa:"M-Pesa",ebirr:"E-birr"};
+/* bank logos: logo-telebirr.jpg, logo-boa.jpg, logo-mpesa.jpg, logo-ebirr.jpg next to index.html; until a logo exists a coloured letter is shown. A picture saved in Admin > Accounts is used first. */
 const lg=(k,acc)=>`<img class="lg" src="${acc&&PAY[k]&&PAY[k].img?PAY[k].img:"logo-"+k+".jpg"}" alt="" onerror="this.outerHTML='<i class=&quot;lg&quot; style=&quot;background:${LG[k][0]}&quot;>${LG[k][1]}</i>'">`;
 function wmSel(k){wsel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="wm_"+k))}
 function pmSel(k){sel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="pm_"+k))}
 function wf(t){
   if(t==="w"&&pendW){$("wform").innerHTML='<div class="watch">⏳ በመጠባበቅ ላይ ያለ የወጪ ጥያቄ አለዎት።<br>ሌላ ከመጠየቅዎ በፊት እስኪፈቀድ ይጠብቁ።</div>';return}
+  if(!PAY[sel])sel=Object.keys(PAY)[0];
   $("wform").innerHTML=t==="d"?Object.keys(PAY).map(k=>`<div class="mth" id="pm_${k}" onclick="pmSel('${k}')">${lg(k,1)}<div><b>${PAY[k].n}</b><span onclick="cp('${PAY[k].a}',event)">${PAY[k].a} 📋</span><small>${PAY[k].h}</small></div></div>`).join("")+`<input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="መጠን (ቢያንስ 30 ብር)"><input class="inp" id="fa2" placeholder="የግብይት ቁጥር"><button class="gb" style="background:var(--gr);color:var(--dk)" onclick="dep()">ገቢውን አስገባ</button>`
  :Object.keys(WM).map(k=>`<div class="mth" id="wm_${k}" onclick="wmSel('${k}')">${lg(k)}<div><b>${WM[k]}</b><small>እዚህ ይቀበሉ</small></div></div>`).join("")+`<input class="inp" id="fa2" placeholder="የሂሳብ ቁጥርዎ / ስልክ"><input class="inp" id="fa3" placeholder="የሂሳብ ባለቤት ስም"><input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="መጠን (ቢያንስ 50 ብር)"><button class="gb" onclick="wd()">ወጪ ጠይቅ</button>`;
   if(t==="d")pmSel(sel);else wmSel(wsel)}
 /* deposit accounts come from the server (Admin > Accounts): number, name and picture */
-function applyAcc(a){if(!a)return;const N={telebirr:"Telebirr",cbe:"CBE",boa:"BOA",dashen:"Dashen Bank"};Object.keys(PAY).forEach(k=>delete PAY[k]);["telebirr","boa","dashen","cbe"].forEach(k=>{if(a[k]&&a[k].a)PAY[k]={n:N[k],a:a[k].a,h:a[k].h,img:a[k].img||""}})}
+function applyAcc(a){if(!a)return;const N={telebirr:"Telebirr",boa:"BOA",mpesa:"M-Pesa",ebirr:"E-birr"};Object.keys(PAY).forEach(k=>delete PAY[k]);["telebirr","boa","mpesa","ebirr"].forEach(k=>{if(a[k]&&a[k].a)PAY[k]={n:N[k],a:a[k].a,h:a[k].h,img:a[k].img||""}})}
 async function openWallet(){show("wal");setNav(3);$("wform").innerHTML="";try{const me=await api("/api/me?acc=1");applyAcc(me.accounts);$("wb").textContent=F(me.balance);$("wbn").textContent=F(me.bonus);pendW=me.withdrawals.some(x=>x.status==="pending");
   $("whist").innerHTML=hrows(me)}catch(e){toast(ERR[e]||e)}}
 async function dep(){try{const d=await api("/api/deposit",{amount:$("fa1").value,txid:$("fa2").value,method:sel});toast(d.status==="approved"?"✅ ገቢው ደርሷል":"✅ ገቢው ተልኳል። ልክ እንደተረጋገጠ ሒሳብዎ ይታደሳል።");openWallet()}catch(e){toast(ERR[e]||e)}}
@@ -419,7 +450,7 @@ async function histPage(){try{const me=await api("/api/me"),h=hrows(me);$("tabc"
 async function profPage(){try{const me=await api("/api/me");$("tabc").innerHTML=`<div class="li"><span>ስም</span><span>${esc(me.name)}</span></div><div class="li"><span>የቴሌግራም መታወቂያ</span><span>${me.id}</span></div><div class="li"><span>ስልክ</span><span>${esc(me.phone||"-")}</span></div>`}catch(e){toast(ERR[e]||e)}}
 async function toggleAuto(){const a=!S.auto;S.auto=a;drawGame();try{await api("/api/auto",{auto:a})}catch(e){S.auto=!a;drawGame();toast(ERR[e]||e)}}
 async function claim(){try{S=await api("/api/bingo",{});off=S.now-Date.now();render()}catch(e){toast(e==="no_bingo"?"❌ ገና ቢንጎ የለም":e==="round_over"?"ዙሩ ቀድሞ አብቅቷል":(ERR[e]||e))}}
-function cp(t,e){if(e)e.stopPropagation();const ok=()=>toast("✅ ተቀድቷል "+t);function fb(){const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();try{document.execCommand("copy");ok()}catch(x){}a.remove()}try{navigator.clipboard.writeText(t).then(ok,fb)}catch(x){fb()}}
+function cp(t,e){if(e)e.stopPropagation();const ok=()=>toast("✅ ተቀድቷል "+t,1);function fb(){const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();try{document.execCommand("copy");ok()}catch(x){}a.remove()}try{navigator.clipboard.writeText(t).then(ok,fb)}catch(x){fb()}}
 
 /* promo banner slider */
 (function(){const tr=$("pbt"),dt=$("pbd"),bn=$("pbn");if(!tr)return;const n=tr.children.length;let i=0,sx=null,t;
@@ -431,7 +462,7 @@ bn.addEventListener("touchend",e=>{if(sx!==null){const d=e.changedTouches[0].cli
 go(0);st()})();
 /* AUTO-UPDATE: every time the game opens it checks the server for a newer version and reloads itself once.
    When you publish a new index.html, change this BUILD text (e.g. 20261013a) so players pick it up. */
-const BUILD="20261017g";
+const BUILD="20261018a";
 (function(){try{fetch(location.pathname+"?c="+Date.now(),{cache:"no-store"}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD="([^"]+)"/);
   if(m&&m[1]!==BUILD&&new URLSearchParams(location.search).get("v")!==m[1])location.replace(location.pathname+"?v="+m[1]+location.hash)}).catch(()=>{})}catch(e){}})();
 buildBoard();

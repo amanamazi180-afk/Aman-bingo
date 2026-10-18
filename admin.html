@@ -91,7 +91,7 @@ function fileToJpeg(file, max){ return new Promise((ok, no) => { const fr = new 
 
 function list(items, fn){ return items && items.length ? items.map(fn).join("") : '<div class="empty">Nothing here yet.</div>'; }
 
-const BANKNAME = { telebirr:"Telebirr", boa:"Bank of Abyssinia (BOA)", dashen:"Dashen Bank", cbe:"Commercial Bank of Ethiopia (CBE)" };
+const BANKNAME = { telebirr:"Telebirr", boa:"Bank of Abyssinia (BOA)", mpesa:"M-Pesa", ebirr:"E-birr" };
 
 const views = {
   async Overview(){
@@ -144,17 +144,17 @@ const views = {
   },
   async Accounts(){ // deposit accounts (number, name and picture) shown to players in the bot and in the game wallet
     const d = await call("/api/admin/accounts");
-    const order = ["telebirr","boa","dashen","cbe"];
-    return `<small style="color:var(--mut)">These are the accounts players are told to pay into. A change is used at once in the bot deposit steps and in the game Wallet. Money already sent to an old account is not affected.</small>` +
+    const order = ["telebirr","boa","mpesa","ebirr"];
+    return `<small style="color:var(--mut)">These are the accounts players are told to pay into (and the banks they can choose when they withdraw). A change is used at once in the bot deposit steps and in the game Wallet. Money already sent to an old account is not affected.</small>` +
       order.map(k => { const x = d.items[k] || {a:"",h:"",img:""};
-        return `<div class="acc"><h3>${BANKNAME[k]}${k==="cbe" ? (d.cbe_on ? " · shown to players" : " · hidden in the bot until you save it") : ""}</h3>
+        return `<div class="acc"><h3>${BANKNAME[k]}</h3>
           <label style="color:var(--mut);font-size:13px">Account / phone number</label>
           <input id="ac-n-${k}" value="${esc(x.a)}" autocomplete="off" inputmode="numeric">
           <label style="color:var(--mut);font-size:13px">Account holder name</label>
           <input id="ac-h-${k}" value="${esc(x.h)}" autocomplete="off">
           <div><button class="pri" data-a="save-acc" data-bank="${k}">Save ${BANKNAME[k].split(" ")[0]}</button></div>
           <label style="color:var(--mut);font-size:13px">Account picture (shown to players in the game wallet and sent with the deposit instructions in the bot)</label>
-          ${x.img ? `<img src="${esc(x.img)}" alt="" style="width:96px;height:96px;object-fit:cover;border-radius:12px;border:1px solid var(--line)">` : '<small style="color:var(--mut)">No picture yet.</small>'}
+          ${x.img ? `<img src="${esc(x.img)}" alt="" style="width:96px;height:96px;object-fit:cover;border-radius:12px;border:1px solid var(--line)">` : '<small style="color:var(--mut)">No picture yet (the logo file in the game folder is used).</small>'}
           <input id="ac-f-${k}" type="file" accept="image/*">
           <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="ok" data-a="upload-acc-img" data-bank="${k}">Upload picture</button>${x.img ? `<button class="bad" data-a="clear-acc-img" data-bank="${k}">Remove picture</button>` : ""}</div></div>`; }).join("");
   },
