@@ -21,6 +21,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
 @keyframes ld{to{width:100%}}
 .gb{border:1px solid var(--ln);background:var(--cd);color:var(--tx);border-radius:14px;padding:11px 14px;font-weight:700;font-size:15px}
 .red{background:var(--rd);border-color:var(--rd);color:#fff}
+.gb.act{background:var(--gr);border-color:var(--gr);color:var(--dk)}
 .row{display:flex;gap:8px;align-items:stretch}
 .pill{flex:1;background:var(--cd);border:1px solid var(--ln);border-radius:14px;padding:6px 4px;text-align:center}
 .pill small{display:block;font-size:10px;color:var(--mu);font-weight:700}.pill b{font-size:19px}.t b{color:var(--or);font-size:24px}
@@ -177,7 +178,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background
   <div class="row"><button class="gb" onclick="goHome()">← ተመለስ</button></div>
   <div class="li"><span>የሚወጣ ሒሳብ</span><span id="wb">0</span></div>
   <div class="li"><span>ቦነስ (ለጨዋታ ብቻ)</span><span id="wbn">0</span></div>
-  <div class="row"><button class="gb" style="flex:1;background:var(--gr);color:var(--dk)" onclick="wf('d')">ገቢ አድርግ</button><button class="gb" style="flex:1" onclick="wf('w')">ወጪ አድርግ</button></div>
+  <div class="row"><button class="gb act" id="tbd" style="flex:1" onclick="wf('d')">ገቢ አድርግ</button><button class="gb" id="tbw" style="flex:1" onclick="wf('w')">ወጪ አድርግ</button></div>
   <div id="wform" style="display:flex;flex-direction:column;gap:10px"></div>
   <div id="whist" style="display:flex;flex-direction:column;gap:6px"></div>
 </div>
@@ -416,6 +417,7 @@ const lg=(k,acc)=>`<img class="lg" src="${acc&&PAY[k]&&PAY[k].img?PAY[k].img:"lo
 function wmSel(k){wsel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="wm_"+k))}
 function pmSel(k){sel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="pm_"+k))}
 function wf(t){
+  $("tbd").classList.toggle("act",t==="d");$("tbw").classList.toggle("act",t==="w");
   if(t==="w"&&pendW){$("wform").innerHTML='<div class="watch">⏳ በመጠባበቅ ላይ ያለ የወጪ ጥያቄ አለዎት።<br>ሌላ ከመጠየቅዎ በፊት እስኪፈቀድ ይጠብቁ።</div>';return}
   if(!PAY[sel])sel=Object.keys(PAY)[0];
   $("wform").innerHTML=t==="d"?Object.keys(PAY).map(k=>`<div class="mth" id="pm_${k}" onclick="pmSel('${k}')">${lg(k,1)}<div><b>${PAY[k].n}</b><span onclick="cp('${PAY[k].a}',event)">${PAY[k].a} 📋</span><small>${PAY[k].h}</small></div></div>`).join("")+`<input class="inp" id="fa1" type="number" inputmode="numeric" placeholder="መጠን (ቢያንስ 30 ብር)"><input class="inp" id="fa2" placeholder="የግብይት ቁጥር"><button class="gb" style="background:var(--gr);color:var(--dk)" onclick="dep()">ገቢውን አስገባ</button>`
@@ -424,7 +426,7 @@ function wf(t){
 /* deposit accounts come from the server (Admin > Accounts): number, name and picture */
 function applyAcc(a){if(!a)return;const N={telebirr:"Telebirr",boa:"BOA",mpesa:"M-Pesa",ebirr:"E-birr"};Object.keys(PAY).forEach(k=>delete PAY[k]);["telebirr","boa","mpesa","ebirr"].forEach(k=>{if(a[k]&&a[k].a)PAY[k]={n:N[k],a:a[k].a,h:a[k].h,img:a[k].img||""}})}
 async function openWallet(){show("wal");setNav(3);$("wform").innerHTML="";try{const me=await api("/api/me?acc=1");applyAcc(me.accounts);$("wb").textContent=F(me.balance);$("wbn").textContent=F(me.bonus);pendW=me.withdrawals.some(x=>x.status==="pending");
-  $("whist").innerHTML=hrows(me)}catch(e){toast(ERR[e]||e)}}
+  $("whist").innerHTML=hrows(me);wf("d")}catch(e){toast(ERR[e]||e)}}
 async function dep(){try{const d=await api("/api/deposit",{amount:$("fa1").value,txid:$("fa2").value,method:sel});toast(d.status==="approved"?"✅ ገቢው ደርሷል":"✅ ገቢው ተልኳል። ልክ እንደተረጋገጠ ሒሳብዎ ይታደሳል።");openWallet()}catch(e){toast(ERR[e]||e)}}
 async function wd(){try{await api("/api/withdraw",{amount:$("fa1").value,account:$("fa2").value,name:$("fa3").value,method:wsel});toast("✅ የወጪ ጥያቄ ተልኳል - በመጠባበቅ ላይ");openWallet()}catch(e){toast(ERR[e]||e)}}
 function tabTo(i){inGame=false;$("win").classList.remove("on");setNav(i);if(i===0){goHome();return}if(i===3){openWallet();return}show("tab");$("tabc").innerHTML='<p class="hint">…</p>';if(i===1)scoresPage("weekly");else if(i===2)histPage();else profPage()}
@@ -462,7 +464,7 @@ bn.addEventListener("touchend",e=>{if(sx!==null){const d=e.changedTouches[0].cli
 go(0);st()})();
 /* AUTO-UPDATE: every time the game opens it checks the server for a newer version and reloads itself once.
    When you publish a new index.html, change this BUILD text (e.g. 20261013a) so players pick it up. */
-const BUILD="20261018b";
+const BUILD="20261018c";
 (function(){try{fetch(location.pathname+"?c="+Date.now(),{cache:"no-store"}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD="([^"]+)"/);
   if(m&&m[1]!==BUILD&&new URLSearchParams(location.search).get("v")!==m[1])location.replace(location.pathname+"?v="+m[1]+location.hash)}).catch(()=>{})}catch(e){}})();
 buildBoard();
