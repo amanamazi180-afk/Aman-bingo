@@ -3,7 +3,8 @@
 //   BOT_TOKEN, ADMIN_TG_ID, SMS_SECRET, TG_SECRET, ADMIN_KEY (secrets) · GAME_URL, ALLOW_ORIGIN, STAKE (plain variables)
 //   Optional: BOT_USERNAME, WELCOME_BONUS, DAILY_BONUS, ADMIN_URL, PROMO_PHOTO
 // wrangler.json needs the HUB binding + migration for GameHub (see the two blocks given with this file).
-// DEPOSIT BANKS (bot + game wallet + withdrawals): Telebirr, BOA, M-Pesa, E-birr. The admin edits the numbers, names and pictures in Admin > Accounts.
+// DEPOSIT BANKS (bot + game wallet): Telebirr, BOA, M-Pesa, E-birr (our accounts; the admin edits numbers, names and pictures in Admin > Accounts).
+// WITHDRAW BANKS (where a player can receive money): CBE, Dashen, Oromia, Awash, BOA, M-Pesa, Telebirr, E-birr (WD_BANKS below).
 // Deposit verification: the player pastes the payment SMS in the bot. The Worker reads the amount + transaction number (Telebirr, Dashen, BOA, CBE formats)
 // and credits the balance automatically when the SAME SMS was forwarded to POST /sms by the SMS-forwarder app on the receiving phone.
 // If that SMS has not arrived yet (or the bank is M-Pesa / E-birr, whose SMS format is not read yet), the deposit waits, is sent to the admins, and is credited when the admin approves (or the matching SMS arrives).
@@ -141,14 +142,15 @@ const instructionText = `📖 እንዴት ይጫወታሉ?\n\n1️⃣ «ገን�
 const KBNOTE = '⌨️ አዲስ! ከታች ያሉትን ቁልፎች (ጨዋታ ተጫወት፣ ገንዘብ አስገባ፣ ቀሪ ሂሳብ) መጠቀም ይችላሉ።';
 
 // banks offered in the deposit / withdraw flows
-const BANKS = { telebirr: 'TELEBIRR', boa: 'BOA', mpesa: 'M-PESA', ebirr: 'E-BIRR' };
+const BANKS = { telebirr: 'TELEBIRR', boa: 'BOA', mpesa: 'M-PESA', ebirr: 'E-BIRR' }; // DEPOSIT: only these 4 accounts of ours
+const WD_BANKS = { cbe: 'CBE', dashen: 'DASHEN', oromia: 'OROMIA BANK', awash: 'AWASH BANK', boa: 'BOA', mpesa: 'M-PESA', telebirr: 'TELEBIRR', ebirr: 'E-BIRR' }; // WITHDRAW: the player can receive money in any of these
 const BANK_DEF = { telebirr: { a: '0958828304', h: 'AMANUEL' }, boa: { a: '266199511', h: 'AMANUEL YISMAH' }, mpesa: { a: '0706577754', h: 'AMANUEL' }, ebirr: { a: '0958828304', h: 'AMANUEL' } }; // used until the admin saves an account (Admin > Accounts)
 let ACC = { ...BANK_DEF }; // the accounts players pay into; refreshed from the database at the start of every bot update (loadAcc)
 async function loadAcc(env) { let s = {}; try { s = JSON.parse(await getSet(env, 'accounts') || '{}') || {} } catch (e) { } const o = {}; for (const k of Object.keys(BANKS)) { const v = s[k]; o[k] = v && v.a ? { a: String(v.a), h: String(v.h || '') } : { ...BANK_DEF[k] } } return ACC = o }
 async function accountsFor(env, url, all) { await loadAcc(env); const im = {}; try { for (const r of (await env.DB.prepare('SELECT bank,ts FROM account_imgs').all()).results) im[r.bank] = r.ts } catch (e) { } const o = {}; for (const k of Object.keys(BANKS)) if (all || ACC[k].a) o[k] = { a: ACC[k].a, h: ACC[k].h, img: im[k] ? `${url.origin}/acc/${k}.jpg?v=${im[k]}` : '' }; return o }
-const banksFor = env => Object.keys(BANKS);
+const banksFor = (env, flow) => Object.keys(flow === 'w' ? WD_BANKS : BANKS);
 const bankKb = (env, flow) => {
-  const b = banksFor(env).map(k => ({ text: BANKS[k], callback_data: `b:${flow}:${k}` })), rows = [];
+  const names = flow === 'w' ? WD_BANKS : BANKS, b = banksFor(env, flow).map(k => ({ text: names[k], callback_data: `b:${flow}:${k}` })), rows = [];
   for (let i = 0; i < b.length; i += 2) rows.push(b.slice(i, i + 2));
   rows.push([{ text: '❌ ሰርዝ', callback_data: 'b:x' }]);
   return { inline_keyboard: rows };
@@ -557,7 +559,7 @@ async function onPlayerCb(env, q, parts) { // menu / bank / cancel buttons
   if (a === 'b') {
     if (parts[1] === 'x') { await clearState(env, uid); return sendMenu(env, uid, '❌ ተሰርዟል።') }
     const flow = parts[1], bank = parts[2], st = await getState(env, uid);
-    if (!BANKS[bank]) return;
+    if (!(flow === 'w' ? WD_BANKS[bank] : BANKS[bank])) return;
     if (flow === 'd') {
       if (!st || st.step !== 'dep_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «ገንዘብ አስገባ» ን እንደገና ይጫኑ።');
       await setState(env, uid, 'dep_paste', { amt: st.amt, method: bank });
@@ -569,7 +571,7 @@ async function onPlayerCb(env, q, parts) { // menu / bank / cancel buttons
     if (flow === 'w') {
       if (!st || st.step !== 'wd_bank') return sendMenu(env, uid, '⌛ ጊዜው አልፏል። እባክዎ «አውጣ» ን እንደገና ይጫኑ።');
       await setState(env, uid, 'wd_account', { amt: st.amt, method: bank });
-      return sendTo(env, uid, `${BANKS[bank]} — ገንዘቡ የሚላክበትን አካውንት ወይም ስልክ ቁጥር ያስገቡ።`);
+      return sendTo(env, uid, `${WD_BANKS[bank]} — ገንዘቡ የሚላክበትን አካውንት ወይም ስልክ ቁጥር ያስገቡ።`);
     }
   }
 }
@@ -727,6 +729,8 @@ async function adminRoute(req, env, url) {
     return J({
       players: await n('SELECT COUNT(*) v FROM users'),
       deposits: B(await n("SELECT SUM(amount_c) v FROM deposits WHERE status='approved'")),
+      deposits_today: B(await n("SELECT SUM(amount_c) v FROM deposits WHERE status='approved' AND ts>=" + startOfDay())), // today = since 00:00 Ethiopia time
+      deposits_today_count: await n("SELECT COUNT(*) v FROM deposits WHERE status='approved' AND ts>=" + startOfDay()),
       withdrawals: B(await n("SELECT SUM(amount_c) v FROM withdrawals WHERE status='paid'")),
       pending: (await n("SELECT COUNT(*) v FROM deposits WHERE status='pending'")) + (await n("SELECT COUNT(*) v FROM withdrawals WHERE status='pending'")),
       rounds: await n("SELECT COUNT(*) v FROM rounds WHERE status='ended'"),
@@ -989,7 +993,7 @@ async function route(req, env, url) {
     return J({ status: r.status, balance: B((await db.prepare('SELECT balance FROM users WHERE id=?').bind(u.id).first()).balance) });
   }
   if (p === '/api/withdraw') {
-    const amt = Number(b.amount), account = String(b.account || '').trim().slice(0, 40), method = String(b.method || 'telebirr').slice(0, 20);
+    const amt = Number(b.amount), account = String(b.account || '').trim().slice(0, 40), method = Object.keys(WD_BANKS).includes(b.method) ? b.method : 'telebirr';
     if (!(amt >= MIN_WD) || !account) return J({ error: 'bad_input', min: MIN_WD }, 400);
     const r = await makeWithdrawal(env, u, amt, account, method); if (r.error) return J({ error: r.error }, r.error === 'deposit_required' ? 403 : 409);
     return J({ status: 'pending' });

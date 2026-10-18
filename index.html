@@ -191,7 +191,7 @@ const $=i=>document.getElementById(i),CL=["#3b82f6","#06b6d4","#22c55e","#f5b73b
 const L=n=>"BINGO"[Math.floor((n-1)/15)],F=n=>String(+Number(n).toFixed(2));
 /* deposit banks: Telebirr, BOA, M-Pesa, E-birr (the real numbers come from the server: Admin > Accounts; these are only the first-load defaults) */
 const PAY={telebirr:{n:"Telebirr",a:"0958828304",h:"AMANUEL"},boa:{n:"BOA",a:"266199511",h:"AMANUEL YISMAH"},mpesa:{n:"M-Pesa",a:"0706577754",h:"AMANUEL"},ebirr:{n:"E-birr",a:"0958828304",h:"AMANUEL"}};
-const LG={telebirr:["#0a8fd8","T"],boa:["#c9a227","B"],mpesa:["#16a34a","M"],ebirr:["#16a34a","E"]};
+const LG={telebirr:["#0a8fd8","T"],boa:["#c9a227","B"],mpesa:["#16a34a","M"],ebirr:["#16a34a","E"],cbe:["#7b2a7e","C"],dashen:["#1b4fa3","D"],oromia:["#0b7a3b","O"],awash:["#e07b00","A"]};
 const ERR={no_api:"የሰርቨር አድራሻ አልተቀመጠም (index.html API መስመር)",not_registered:"እባክዎ መጀመሪያ በቦቱ ይመዝገቡ (ስልክ ቁጥርዎን ያጋሩ)",insufficient_balance:"በቂ ሒሳብ የለዎትም - መጀመሪያ ገቢ ያድርጉ",round_closed:"ዙሩ ጀምሯል",max_cards:"ከ2 ካርቴላ በላይ መያዝ አይችሉም",taken:"ካርቴላው ተይዟል",bad_input:"ያስገቡትን ቁጥሮች ያረጋግጡ",too_many_pending:"በመጠባበቅ ላይ ብዙ የገቢ ጥያቄዎች አሉዎት። እስኪረጋገጡ ይጠብቁ።",txid_used:"ይህ የግብይት ቁጥር ቀድሞ ጥቅም ላይ ውሏል",deposit_required:"ወጪ ከማድረግዎ በፊት ገቢ ያድርጉ",withdraw_pending:"በመጠባበቅ ላይ ያለ የወጪ ጥያቄ አለዎት። እስኪፈቀድ ይጠብቁ።",unauthorized:"ጨዋታውን ከቴሌግራም ቦት ይክፈቱ",server_error:"የሰርቨር ችግር፣ እንደገና ይሞክሩ",banned:"አካውንትዎ ታግዷል። ድጋፍን ያነጋግሩ።",paused:"ጨዋታው ለጊዜው ቆሟል",locked:"🔒 ይህ ዙር ተቆልፏል፦ የያዙትን ካርቴላ መቀየር አይቻልም"};
 let ready=false,S=null,off=0,inGame=false,looping=false,snd_on=true,lastN=0,rid=0,key="",reg=false,pend=0,gkey="";
 /* SHS = the called numbers that are SHOWN on screen. A number is shown at the exact moment its voice starts, so the screen and the voice are always in sync. */
@@ -410,8 +410,8 @@ function leaveGame(){inGame=false;$("win").classList.remove("on");goHome()}
 /* wallet */
 const SL=x=>({pending:"በመጠባበቅ ላይ",paid:"ተፈቅዷል",approved:"ተፈቅዷል",rejected:"ውድቅ ተደርጓል"}[x]||x),SC=x=>x==="paid"||x==="approved"?"#22c55e":x==="rejected"?"#ef4444":"#f5b73b";
 const hrows=me=>[...me.deposits.filter(x=>x.status==="approved").map(x=>["Deposit",x]),...me.withdrawals.map(x=>["Withdraw",x])].map(([t,x])=>t==="Deposit"?`<div class="li"><span>ገቢ ${F(x.amount)}</span><span></span></div>`:`<div class="li"><span>ወጪ ${F(x.amount)}</span><span style="color:${SC(x.status)}">${SL(x.status)}</span></div>`).join("");
-let sel="telebirr",wsel="telebirr",pendW=false;const WM={telebirr:"Telebirr",boa:"BOA",mpesa:"M-Pesa",ebirr:"E-birr"};
-/* bank logos: logo-telebirr.jpg, logo-boa.jpg, logo-mpesa.jpg, logo-ebirr.jpg next to index.html; until a logo exists a coloured letter is shown. A picture saved in Admin > Accounts is used first. */
+let sel="telebirr",wsel="telebirr",pendW=false;const WM={cbe:"CBE",dashen:"Dashen Bank",oromia:"Oromia Bank",awash:"Awash Bank",boa:"BOA",mpesa:"M-Pesa",telebirr:"Telebirr",ebirr:"E-birr"}; /* WITHDRAW: the player can receive money in any of these; DEPOSIT shows only our 4 accounts (PAY above) */
+/* bank logos: logo-telebirr.jpg, logo-boa.jpg, logo-mpesa.jpg, logo-ebirr.jpg (and optionally logo-cbe.jpg, logo-dashen.jpg, logo-oromia.jpg, logo-awash.jpg) next to index.html; until a logo exists a coloured letter is shown. A picture saved in Admin > Accounts is used first. */
 const lg=(k,acc)=>`<img class="lg" src="${acc&&PAY[k]&&PAY[k].img?PAY[k].img:"logo-"+k+".jpg"}" alt="" onerror="this.outerHTML='<i class=&quot;lg&quot; style=&quot;background:${LG[k][0]}&quot;>${LG[k][1]}</i>'">`;
 function wmSel(k){wsel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="wm_"+k))}
 function pmSel(k){sel=k;document.querySelectorAll(".mth").forEach(e=>e.classList.toggle("on",e.id==="pm_"+k))}
@@ -462,7 +462,7 @@ bn.addEventListener("touchend",e=>{if(sx!==null){const d=e.changedTouches[0].cli
 go(0);st()})();
 /* AUTO-UPDATE: every time the game opens it checks the server for a newer version and reloads itself once.
    When you publish a new index.html, change this BUILD text (e.g. 20261013a) so players pick it up. */
-const BUILD="20261018a";
+const BUILD="20261018b";
 (function(){try{fetch(location.pathname+"?c="+Date.now(),{cache:"no-store"}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD="([^"]+)"/);
   if(m&&m[1]!==BUILD&&new URLSearchParams(location.search).get("v")!==m[1])location.replace(location.pathname+"?v="+m[1]+location.hash)}).catch(()=>{})}catch(e){}})();
 buildBoard();

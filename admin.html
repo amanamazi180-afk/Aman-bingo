@@ -96,7 +96,7 @@ const BANKNAME = { telebirr:"Telebirr", boa:"Bank of Abyssinia (BOA)", mpesa:"M-
 const views = {
   async Overview(){
     const d = await call("/api/admin/overview");
-    const stats = [["Players",d.players],["Deposits (birr)",d.deposits],["Withdrawals paid (birr)",d.withdrawals],["Player balances (birr)",d.held],["Pending requests",d.pending],["Rounds played",d.rounds]];
+    const stats = [["Players",d.players],["Deposits today (birr)",d.deposits_today],["Deposits today (count)",d.deposits_today_count],["Deposits all time (birr)",d.deposits],["Withdrawals paid (birr)",d.withdrawals],["Player balances (birr)",d.held],["Pending requests",d.pending],["Rounds played",d.rounds]];
     return '<div class="grid">' + stats.map(([l,v])=>`<div class="card"><b>${esc(v ?? 0)}</b><span>${l}</span></div>`).join("") + "</div>";
   },
   async Pending(){
