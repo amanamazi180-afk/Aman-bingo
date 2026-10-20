@@ -5,6 +5,7 @@
 // wrangler.json needs the HUB binding + migration for GameHub (see the two blocks given with this file).
 // DEPOSIT BANKS (bot + game wallet): Telebirr, BOA, M-Pesa, E-birr (our accounts; the admin edits numbers, names and pictures in Admin > Accounts).
 // WITHDRAW BANKS (where a player can receive money): CBE, Dashen, Oromia, Awash, BOA, M-Pesa, Telebirr, E-birr (WD_BANKS below).
+// WIN RULES: a full line (row, column or diagonal) OR the 4 CORNERS of the cartela (top-left, top-right, bottom-left, bottom-right) wins (see hasBingo below).
 // Deposit verification: the player pastes the payment SMS in the bot. The Worker reads the amount + transaction number (Telebirr, Dashen, BOA, CBE formats)
 // and credits the balance automatically when the SAME SMS was forwarded to POST /sms by the SMS-forwarder app on the receiving phone.
 // If that SMS has not arrived yet (or the bank is M-Pesa / E-birr, whose SMS format is not read yet), the deposit waits, is sent to the admins, and is credited when the admin approves (or the matching SMS arrives).
@@ -45,6 +46,7 @@ export function makeCard(no) {
 }
 export function hasBingo(card, marked) {
   const m = (c, r) => { const v = card[c][r]; return v === 0 || marked.has(v) }, n = [0, 1, 2, 3, 4];
+  if (m(0, 0) && m(4, 0) && m(0, 4) && m(4, 4)) return true; // 4 CORNERS win
   for (let i = 0; i < 5; i++) if (n.every(j => m(j, i)) || n.every(j => m(i, j))) return true;
   return n.every(i => m(i, i)) || n.every(i => m(i, 4 - i));
 }
@@ -143,7 +145,7 @@ const menuKb = env => [
   [{ text: 'ጋብዝ 🔗', callback_data: 'm:inv' }]];
 const sendMenu = (env, chat, text) => say(env, chat, text, menuKb(env));
 const askContact = (env, uid) => sendTo(env, uid, '👋 እንኳን ወደ አማን ቢንጎ በደህና መጡ!\n\nለመመዝገብ ከታች ያለውን «📱 ስልክ ቁጥሬን አጋራ» ቁልፍ ይጫኑ።' + (welcomeC(env) > 0 ? `\n🎁 ሲመዘገቡ ${B(welcomeC(env))} ብር ስጦታ ያገኛሉ!` : ''), SHARE_KB);
-const instructionText = `📖 እንዴት ይጫወታሉ?\n\n1️⃣ «ገንዘብ አስገባ» ን ተጭነው ገንዘብ ያስገቡ (ቢያንስ ${MIN_DEP} ብር)።\n2️⃣ «ተጫወት» ን ተጭነው ጨዋታውን ይክፈቱ።\n3️⃣ ከ1 እስከ ${TOTAL} ካርቴላ ይምረጡ — እስከ ${MAXC} ካርቴላ መያዝ ይቻላል።\n4️⃣ ቁጥሮች ሲጠሩ ካርዱ ላይ ምልክት ይደረጋል። መስመር (ወደጎን፣ ወደታች ወይም ዲያጎናል) የሞላ ካርቴላ ያሸንፋል።\n5️⃣ አሸናፊው ከጠቅላላው ድርሻ ${Math.round(CUT * 100)}% ያገኛል። ጨዋታ ለመጀመር ቢያንስ 2 ተጫዋች ያስፈልጋል።\n6️⃣ ለማውጣት «አውጣ» ን ይጫኑ (ቢያንስ ${MIN_WD} ብር)።\n\nጥያቄ ካለዎት: ${SUPPORT}`;
+const instructionText = `📖 እንዴት ይጫወታሉ?\n\n1️⃣ «ገንዘብ አስገባ» ን ተጭነው ገንዘብ ያስገቡ (ቢያንስ ${MIN_DEP} ብር)።\n2️⃣ «ተጫወት» ን ተጭነው ጨዋታውን ይክፈቱ።\n3️⃣ ከ1 እስከ ${TOTAL} ካርቴላ ይምረጡ — እስከ ${MAXC} ካርቴላ መያዝ ይቻላል።\n4️⃣ ቁጥሮች ሲጠሩ ካርዱ ላይ ምልክት ይደረጋል። መስመር (ወደጎን፣ ወደታች ወይም ዲያጎናል) ወይም 4ቱን ማዕዘኖች የሞላ ካርቴላ ያሸንፋል።\n5️⃣ አሸናፊው ከጠቅላላው ድርሻ ${Math.round(CUT * 100)}% ያገኛል። ጨዋታ ለመጀመር ቢያንስ 2 ተጫዋች ያስፈልጋል።\n6️⃣ ለማውጣት «አውጣ» ን ይጫኑ (ቢያንስ ${MIN_WD} ብር)።\n\nጥያቄ ካለዎት: ${SUPPORT}`;
 const KBNOTE = '⌨️ አዲስ! ከታች ያሉትን ቁልፎች (ጨዋታ ተጫወት፣ ገንዘብ አስገባ፣ ቀሪ ሂሳብ) መጠቀም ይችላሉ።';
 
 // banks offered in the deposit / withdraw flows
@@ -199,7 +201,7 @@ async function tryMatch(env, txid) { // credit a pending deposit when a matching
     db.prepare("UPDATE users SET balance=balance+(SELECT d.amount_c FROM deposits d WHERE d.txid=?1) WHERE id=(SELECT d.user_id FROM deposits d JOIN sms_log s ON s.txid=d.txid WHERE d.txid=?1 AND d.status='pending' AND s.claimed=0 AND s.amount_c=d.amount_c AND " + held + ")").bind(txid),
     db.prepare("UPDATE deposits SET status='approved',note='auto' WHERE txid=?1 AND status='pending' AND EXISTS(SELECT 1 FROM sms_log s WHERE s.txid=?1 AND s.claimed=0 AND s.amount_c=deposits.amount_c) AND " + held).bind(txid),
     db.prepare("UPDATE sms_log SET claimed=1 WHERE txid=?1 AND claimed=0 AND EXISTS(SELECT 1 FROM deposits d WHERE d.txid=?1 AND d.status='approved')").bind(txid)]);
-  if (r[1].meta.changes > 0) { const d = await db.prepare('SELECT user_id,amount_c FROM deposits WHERE txid=?').bind(txid).first(); say(env, d.user_id, `✅ የ${B(d.amount_c)} ብር ገቢዎ ተቀብለናል።`, playKb(env)); return true }
+  if (r[1].meta.changes > 0) { const d = await db.prepare('SELECT user_id,amount_c FROM deposits WHERE txid=?').bind(txid).first(); say(env, d.user_id, `✅ የ${B(d.amount_c)} ብር ገቢዎን ተቀብለናል።`, playKb(env)); return true }
   return false;
 }
 async function decideDeposit(env, id, ok) {
@@ -265,7 +267,7 @@ async function autoApprove(env, id) {
   if (r[1].meta.changes > 0) {
     const d = await db.prepare('SELECT user_id,amount_c,txid FROM deposits WHERE id=?').bind(id).first();
     await db.prepare('INSERT INTO admin_log(ts,actor,action,detail) VALUES(?,?,?,?)').bind(Date.now(), 'verify.et', 'auto credit', 'deposit #' + id + ' · ' + B(d.amount_c) + ' birr · tx ' + d.txid).run().catch(() => { });
-    say(env, d.user_id, `✅ የ${B(d.amount_c)} ብር ገቢዎ ተቀብለናል።`, playKb(env));
+    say(env, d.user_id, `✅ የ${B(d.amount_c)} ብር ገቢዎን ተቀብለናል።`, playKb(env));
     return true;
   }
   return false;
