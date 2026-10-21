@@ -21,6 +21,7 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
 .card b{display:block;font-size:22px;color:var(--gold)}.card span{color:var(--mut);font-size:13px}
+.card.tap{cursor:pointer;border-color:var(--gold)}.card.tap span:last-child{display:block;margin-top:2px;color:var(--gold);font-size:12px}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
 .row small{color:var(--mut);display:block;word-break:break-all}
 .row .acts{display:flex;gap:6px}
@@ -38,6 +39,7 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 .won{color:var(--gold)}
 .acc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0;display:flex;flex-direction:column;gap:8px}
 .acc h3{margin:0;font-size:16px;color:var(--gold)}
+.todaytag{color:var(--ok);font-size:12px;font-weight:600}
 </style>
 </head>
 <body>
@@ -91,13 +93,23 @@ function fileToJpeg(file, max){ return new Promise((ok, no) => { const fr = new 
 
 function list(items, fn){ return items && items.length ? items.map(fn).join("") : '<div class="empty">Nothing here yet.</div>'; }
 
-const BANKNAME = { telebirr:"Telebirr", boa:"Bank of Abyssinia (BOA)", mpesa:"M-Pesa", ebirr:"E-birr" };
+const BANKNAME = { telebirr:"Telebirr", boa:"Bank of Abyssinia (BOA)", mpesa:"M-Pesa", ebirr:"E-birr", cbe:"CBE", dashen:"Dashen" };
+const HOW = { auto:"auto (SMS match)", admin:"approved by admin", "verify.et":"verify.et" };
 
 const views = {
   async Overview(){
     const d = await call("/api/admin/overview");
-    const stats = [["Players",d.players],["Deposits today (birr)",d.deposits_today],["Deposits today (count)",d.deposits_today_count],["Deposits all time (birr)",d.deposits],["Withdrawals paid (birr)",d.withdrawals],["Player balances (birr)",d.held],["Pending requests",d.pending],["Rounds played",d.rounds]];
-    return '<div class="grid">' + stats.map(([l,v])=>`<div class="card"><b>${esc(v ?? 0)}</b><span>${l}</span></div>`).join("") + "</div>";
+    // the "Deposits today (count)" card is a button: it opens the list of the last 100 deposits with the player names
+    const stats = [["Players",d.players],["Deposits today (birr)",d.deposits_today],["Deposits today (count)",d.deposits_today_count,"deposits"],["Deposits all time (birr)",d.deposits],["Withdrawals paid (birr)",d.withdrawals],["Player balances (birr)",d.held],["Pending requests",d.pending],["Rounds played",d.rounds]];
+    return '<div class="grid">' + stats.map(([l,v,a])=> a
+      ? `<div class="card tap" data-a="${a}" role="button" tabindex="0"><b data-a="${a}">${esc(v ?? 0)}</b><span data-a="${a}">${l}</span><span data-a="${a}">Tap to see the last 100 deposits ›</span></div>`
+      : `<div class="card"><b>${esc(v ?? 0)}</b><span>${l}</span></div>`).join("") + "</div>";
+  },
+  async Deposits(){ // last 100 credited deposits with the player name (opened from the Overview card)
+    const d = await call("/api/admin/deposits");
+    const today = d.today_ts || 0;
+    const head = `<div class="row"><button data-a="back-overview">‹ Overview</button><b>Last ${esc(d.items.length)} deposits</b></div>`;
+    return head + list(d.items, x => `<div class="row"><div><b>${esc(x.name)}</b>${x.ts >= today ? ' <span class="todaytag">· today</span>' : ''}<small>${esc(x.phone)} · ${esc(BANKNAME[x.method] || x.method)}${x.how ? " · " + esc(HOW[x.how] || x.how) : ""}</small><small>${esc(new Date(x.ts).toLocaleString())}</small></div><b class="won">${esc(x.amount)} birr</b></div>`);
   },
   async Pending(){
     const d = await call("/api/admin/pending");
@@ -215,12 +227,15 @@ async function show(){
 
 $("tabs").onclick = e => { const t=e.target.dataset.t; if(t){ tab=t; show(); } };
 $("view").onclick = async e => {
-  const a=e.target.dataset.a; if(!a) return;
-  const id = Number(e.target.dataset.id);
+  const el = e.target.closest("[data-a]"); if(!el) return;
+  const a = el.dataset.a;
+  const id = Number(el.dataset.id);
   try {
+    if(a==="deposits"){ tab="Deposits"; return show(); }
+    if(a==="back-overview"){ tab="Overview"; return show(); }
     if(a==="search"){ q=$("q").value.trim(); return show(); }
     if(a==="approve"||a==="reject"){
-      const r = await call("/api/admin/"+a, {id, type:e.target.dataset.type});
+      const r = await call("/api/admin/"+a, {id, type:el.dataset.type});
       if(r.ok===false){ say("Already processed.", "err"); setTimeout(show, 800); return; }
     } else if(a==="add"||a==="remove"){
       const v = Number($("amt-"+id).value); if(!(v>0)) return say("Enter an amount in birr.", "err");
@@ -230,23 +245,23 @@ $("view").onclick = async e => {
       const v = Number($("stake").value); if(!(v>=1)) return say("Enter a stake of at least 1 birr.", "err");
       await call("/api/admin/set-stake", {stake:v});
     } else if(a==="save-acc"){
-      const bank = e.target.dataset.bank, number = $("ac-n-"+bank).value.trim(), name = $("ac-h-"+bank).value.trim();
+      const bank = el.dataset.bank, number = $("ac-n-"+bank).value.trim(), name = $("ac-h-"+bank).value.trim();
       if(number.length<4) return say("Enter the account or phone number.", "err");
       if(name.length<2) return say("Enter the account holder name.", "err");
       if(!confirm("Save this " + BANKNAME[bank] + " account?\n\n" + number + "\n" + name + "\n\nPlayers will be told to pay into it.")) return;
       await call("/api/admin/set-account", {bank, number, name});
       say("Account saved. Players now see the new number and name.", "good"); setTimeout(show, 700); return;
     } else if(a==="upload-acc-img"){
-      const bank = e.target.dataset.bank, f = $("ac-f-"+bank).files[0]; if(!f) return say("Choose a picture first.", "err");
+      const bank = el.dataset.bank, f = $("ac-f-"+bank).files[0]; if(!f) return say("Choose a picture first.", "err");
       const data = await fileToJpeg(f, 480);
       await call("/api/admin/set-account-image", {bank, data});
       say("Picture saved.", "good"); setTimeout(show, 700); return;
     } else if(a==="clear-acc-img"){
-      const bank = e.target.dataset.bank; if(!confirm("Remove this picture?")) return;
+      const bank = el.dataset.bank; if(!confirm("Remove this picture?")) return;
       await call("/api/admin/clear-account-image", {bank});
       say("Picture removed.", "good"); setTimeout(show, 700); return;
     } else if(a==="autotake"){
-      const on = e.target.dataset.on === "1", body = { on };
+      const on = el.dataset.on === "1", body = { on };
       if(on){ body.support = $("at-u").value.trim(); body.count = $("at-n").value.trim(); }
       await call("/api/admin/set-autotake", body);
       say(on ? "Take cartelas is ON. It starts with the open lobby or the next round." : "Take cartelas is OFF.", "good"); setTimeout(show, 700); return;
@@ -279,7 +294,7 @@ $("view").onclick = async e => {
     say("Done.", "good"); setTimeout(show, 600);
   } catch(err){ say(err.message, "err"); }
 };
-$("view").addEventListener("keydown", e => { if(e.target.id==="q" && e.key==="Enter"){ q=e.target.value.trim(); show(); } });
+$("view").addEventListener("keydown", e => { if(e.target.id==="q" && e.key==="Enter"){ q=e.target.value.trim(); show(); } if(e.key==="Enter" && e.target.classList && e.target.classList.contains("tap")) e.target.click(); });
 $("go").onclick = async () => {
   key = $("key").value.trim(); if(!key) return say("Enter the admin password.", "err");
   try { await call("/api/admin/overview"); sessionStorage.setItem("ak", key); $("login").hidden=true; $("app").hidden=false; show(); }

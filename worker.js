@@ -25,6 +25,7 @@
 // WINNER MESSAGE: when a round ends, every winner gets a bot message "ዙር <round> አሸናፊ ሆነዋል ብር = <prize>" (sent once, from settle()).
 // AUTO-TAKE: Admin > AutoTake switches on automatic taking of N random cartelas every round for the support account; a win pays the support account (see autoTake() below).
 // RELIABILITY: a short database hiccup while taking / dropping a cartela is retried once (retryDb) so players do not see "server problem".
+// DEPOSITS LIST: Admin > Overview > tap "Deposits today (count)" opens the last 100 credited deposits with the player name (route /api/admin/deposits).
 import { DurableObject } from 'cloudflare:workers';
 const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 600, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
@@ -811,6 +812,10 @@ async function adminRoute(req, env, url) {
       rounds: await n("SELECT COUNT(*) v FROM rounds WHERE status='ended'"),
       held: B(await n('SELECT SUM(balance) v FROM users'))
     });
+  }
+  if (name === 'deposits') { // last 100 credited deposits with the player name (Overview > tap "Deposits today (count)")
+    const r = (await db.prepare("SELECT d.id,d.amount_c,d.method,d.note,d.ts,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='approved' ORDER BY d.id DESC LIMIT 100").all()).results;
+    return J({ today_ts: startOfDay(), items: r.map(x => ({ id: x.id, name: x.name, phone: x.phone || '', amount: B(x.amount_c), method: x.method, how: x.note || '', ts: x.ts })) });
   }
   if (name === 'pending') {
     const d = (await db.prepare("SELECT d.id,d.amount_c,d.method,d.txid,u.name,u.phone,(SELECT amount_c FROM sms_log WHERE txid=d.txid) sms_c,(SELECT verdict||' · '||detail FROM verify_log WHERE txid=d.txid) vet FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending' ORDER BY d.id").all()).results;
