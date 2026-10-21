@@ -229,7 +229,7 @@ async function api(p,b){
 
 /* card helpers (same generator as the server) */
 function mk(no){let s=no*7919+13;const r=()=>(s=(s*1664525+1013904223)%4294967296)/4294967296,cols=[];for(let c=0;c<5;c++){const p=Array.from({length:15},(_,i)=>c*15+i+1),o=[];for(let i=0;i<5;i++)o.push(p.splice(Math.floor(r()*p.length),1)[0]);cols.push(o)}cols[2][2]=0;return cols}
-function winLine(c,cl){const m=(a,b)=>c[a][b]===0||cl.includes(c[a][b]),ls=[];for(let i=0;i<5;i++){ls.push([0,1,2,3,4].map(j=>[j,i]));ls.push([0,1,2,3,4].map(j=>[i,j]))}ls.push([0,1,2,3,4].map(j=>[j,j]));ls.push([0,1,2,3,4].map(j=>[j,4-j]));return ls.find(l=>l.every(([a,b])=>m(a,b)))||null}
+function winLine(c,cl){const m=(a,b)=>c[a][b]===0||cl.includes(c[a][b]),ls=[];for(let i=0;i<5;i++){ls.push([0,1,2,3,4].map(j=>[j,i]));ls.push([0,1,2,3,4].map(j=>[i,j]))}ls.push([0,1,2,3,4].map(j=>[j,j]));ls.push([0,1,2,3,4].map(j=>[j,4-j]));ls.push([[0,0],[4,0],[0,4],[4,4]]);return ls.find(l=>l.every(([a,b])=>m(a,b)))||null}
 function cardHTML(no,cl,hl,last){const c=mk(no);let h='<div class="card">'+[..."BINGO"].map((l,i)=>`<div class="h" style="background:${CL[i]}">${l}</div>`).join("");for(let r=0;r<5;r++)for(let k=0;k<5;k++){const v=c[k][r],m=v===0||cl.includes(v),w=hl&&hl.some(x=>x[0]===k&&x[1]===r);h+=`<div class="c${w?" w":m?" m":""}${v&&v===last?" l":""}">${v===0?"★":v}</div>`}return h+"</div>"}
 
 /* VOICE v3 - every called number is spoken, in order, once, and the number appears on screen exactly when its voice starts.
@@ -468,7 +468,7 @@ bn.addEventListener("touchend",e=>{if(sx!==null){const d=e.changedTouches[0].cli
 go(0);st()})();
 /* AUTO-UPDATE: every time the game opens it checks the server for a newer version and reloads itself once.
    When you publish a new index.html, change this BUILD text (e.g. 20261013a) so players pick it up. */
-const BUILD="20261021c";
+const BUILD="20261021d";
 (function(){try{fetch(location.pathname+"?c="+Date.now(),{cache:"no-store"}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD="([^"]+)"/);
   if(m&&m[1]!==BUILD&&new URLSearchParams(location.search).get("v")!==m[1])location.replace(location.pathname+"?v="+m[1]+location.hash)}).catch(()=>{})}catch(e){}})();
 buildBoard();

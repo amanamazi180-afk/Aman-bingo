@@ -16,7 +16,8 @@
 //   If verify.et is down, slow, out of credits or unsure, nothing is credited: the deposit waits for the SMS match or the admin. verify.et can never reject a deposit.
 // SECRET BONUS: the admin chooses cartela numbers for one round (Admin > Bonus). The player who takes one of them wins the bonus at once and is announced to everybody.
 // In a bonus round every taken cartela is locked (nobody can drop or change it), and the secret cartela numbers are never sent to the phones.
-// WEEKLY TOP PLAYERS: players are ranked by games played in the week (Monday 00:00 - Sunday 24:00 Ethiopia time). The admin sets the prizes (Admin > Weekly) and pays last week's winners with one button.
+// WEEKLY BONUS (top 1-10 players): the ADMIN decides when it starts and stops (Admin > Weekly > "Start weekly bonus now" / "Stop now"). While it is ON (default 7 days, the admin can choose 1-30 days),
+//   players are ranked by games played since the start; while it is OFF no games are counted and the Scores tab says it has not started. The admin sets the prizes (Admin > Weekly) and pays the finished period's winners with one button (once per period).
 // BOTTOM KEYBOARD: the bot shows a permanent keyboard under the chat box (ጨዋታ ተጫወት, ገንዘብ አስገባ, ቀሪ ሂሳብ) after /start and after registration.
 // LANGUAGE: every message and button the bot sends is in Amharic. CARTELAS: 1 to 600 (TOTAL below).
 // FAKE-TEXT SCAN: money is credited automatically only when the forwarded bank SMS has the same transaction number and amount; unmatched deposits reach the admin with a checklist (SMS found?, amount equal?, number format, player history, verify.et); max 3 pending deposits per player.
@@ -32,7 +33,6 @@ const bonusC = env => C(env.DAILY_BONUS ?? 0), // daily bonus is off unless DAIL
    bonusPeriod = now => Math.floor((now - 5 * 36e5) / 864e5); // new period starts 08:00 Ethiopia time (05:00 UTC)
 const refreshBonusStmt = (env, id, now) => env.DB.prepare('UPDATE users SET bonus_c=?1,bonus_period=?2 WHERE id=?3 AND (bonus_period<?2 OR (?1=0 AND bonus_c<>0))').bind(bonusC(env), bonusPeriod(now), id); // resets to the daily amount (0 = off), never added on top
 const refreshBonus = (env, id, now) => refreshBonusStmt(env, id, now).run();
-const weekStart = (t = Date.now()) => { const d = Math.floor((t + 3 * 36e5) / 864e5); return (d - (d + 3) % 7) * 864e5 - 3 * 36e5 }; // Monday 00:00 Ethiopia time of the week containing t
 const rnd32 = () => crypto.getRandomValues(new Uint32Array(1))[0];
 const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { 'content-type': 'application/json' } });
 
@@ -328,9 +328,9 @@ const ensureTables = async env => { if (tablesReady) return; await env.DB.batch(
   env.DB.prepare('CREATE TABLE IF NOT EXISTS kb_sent(uid INTEGER PRIMARY KEY)'), // players who already received the bottom keyboard
   env.DB.prepare('CREATE TABLE IF NOT EXISTS referrals(user_id INTEGER PRIMARY KEY,ref_id INTEGER,ts INTEGER)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS bonus_wins(round_id INTEGER,cartela INTEGER,user_id INTEGER,name TEXT,amount_c INTEGER,paid INTEGER DEFAULT 0,ts INTEGER,PRIMARY KEY(round_id,cartela))'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_games(week INTEGER,user_id INTEGER,games INTEGER DEFAULT 0,PRIMARY KEY(week,user_id))'), // games played per player per week (Monday 00:00 Ethiopia time)
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_games(week INTEGER,user_id INTEGER,games INTEGER DEFAULT 0,PRIMARY KEY(week,user_id))'), // games played per player in a weekly-bonus period (week = the start time of the period, set by the admin)
   env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_wk_games ON wk_games(week,games DESC)'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_paid(week INTEGER PRIMARY KEY,ts INTEGER)'), // weeks whose prizes were already paid (a week can be paid only once)
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_paid(week INTEGER PRIMARY KEY,ts INTEGER)'), // periods whose prizes were already paid (a period can be paid only once)
   env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_winners(week INTEGER,pos INTEGER,user_id INTEGER,name TEXT,prize_c INTEGER,games INTEGER,PRIMARY KEY(week,pos))'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS verify_log(txid TEXT PRIMARY KEY,bank TEXT,verdict TEXT,detail TEXT,ts INTEGER)'), // verify.et second opinion per deposit; verdict bad / hold = automatic credit is blocked, ok / unknown = information only
   env.DB.prepare('CREATE TABLE IF NOT EXISTS account_imgs(bank TEXT PRIMARY KEY,data TEXT,ts INTEGER)')]); // deposit account pictures (kept out of settings so the hot settings read stays small)
@@ -341,6 +341,12 @@ const loadCfg = async env => { if (Date.now() - cfg.t < 5000) return cfg; await 
 const getSet = async (env, k) => (await loadCfg(env)).set[k] ?? null;
 const setSet = async (env, k, v) => { await ensureTables(env); await env.DB.prepare('INSERT INTO settings(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v').bind(k, v).run(); cfg.t = 0 };
 const isBanned = async (env, id) => (await loadCfg(env)).bans.has(String(id));
+
+/* ---------- WEEKLY BONUS switch (the admin decides when it starts and stops) ----------
+   Stored in settings.wk_cfg = {"on":true,"start":<ms>,"end":<ms>}. It is RUNNING only while on && start<=now<end.
+   Games are counted (wk_games, keyed by the start time) only while it is running. When it stops or ends, the period stays in the database so the admin can pay its winners. */
+const wkCfg = async env => { try { const c = JSON.parse(await getSet(env, 'wk_cfg') || 'null') || {}; return { on: !!c.on, start: Number(c.start) || 0, end: Number(c.end) || 0 } } catch (e) { return { on: false, start: 0, end: 0 } } };
+const wkRunning = (c, now) => !!(c.on && c.start > 0 && now >= c.start && now < c.end);
 
 /* ---------- secret bonus (admin chooses cartelas for one round; the taker wins at once) ----------
    Stored in settings as {"on":true,"round":12,"items":[{"c":7,"a":5000}]} (a = cents). Read straight from the database (never cached)
@@ -396,9 +402,10 @@ async function settle(env, r, picks, w, now) { // pays the winners and ends the 
   await ensureTables(env);
   const db = env.DB, prize = Math.floor(picks.length * r.stake_c * CUT), share = Math.floor(prize / w.picks.length);
   let sup = 0; try { sup = Number(JSON.parse(await getSet(env, 'autotake') || '{}').uid) || 0 } catch (e) { } // the support account never appears in the weekly ranking
+  const wc = await wkCfg(env), wkOn = wkRunning(wc, now); // games count for the weekly bonus ONLY while the admin has it switched ON
   const res = await db.batch([...w.picks.map(p => db.prepare("UPDATE users SET balance=balance+?3 WHERE id=?2 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running')").bind(r.id, p.user_id, share)),
     // weekly ranking: every player of this round gets +1 game (only while the round is still 'running', so it can never count twice)
-    db.prepare("INSERT INTO wk_games(week,user_id,games) SELECT ?2,user_id,1 FROM(SELECT DISTINCT user_id FROM picks WHERE round_id=?1 AND user_id<>?3) WHERE EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running') ON CONFLICT(week,user_id) DO UPDATE SET games=games+1").bind(r.id, weekStart(now), sup),
+    ...(wkOn ? [db.prepare("INSERT INTO wk_games(week,user_id,games) SELECT ?2,user_id,1 FROM(SELECT DISTINCT user_id FROM picks WHERE round_id=?1 AND user_id<>?3) WHERE EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='running') ON CONFLICT(week,user_id) DO UPDATE SET games=games+1").bind(r.id, wc.start, sup)] : []),
     db.prepare("UPDATE rounds SET status='ended',ended_ts=?2,called_n=?3,winners=?4 WHERE id=?1 AND status='running'").bind(r.id, now, w.k, JSON.stringify(w.picks.map(p => p.cartela)))]);
   const done = res[res.length - 1].meta.changes > 0;
   if (done) { // only the request that really ended the round gets here, so every winner receives the message exactly once
@@ -561,8 +568,8 @@ const poke = env => env.HUB ? hubOf(env).invalidate().catch(() => { }) : null;
 
 const startOfDay = () => Math.floor((Date.now() + 3 * 36e5) / 864e5) * 864e5 - 3 * 36e5; // Ethiopia time (UTC+3)
 
-/* ---------- weekly top players (ranked by games played; a week runs Monday 00:00 to Sunday 24:00 Ethiopia time) ----------
-   Games are counted in wk_games when a round ends. Prizes are set by the admin (Admin > Weekly) and paid by the admin with one button after the week is over. */
+/* ---------- weekly bonus: top players ranked by games played while the admin has the weekly bonus ON ----------
+   Games are counted in wk_games when a round ends (see settle). Prizes are set by the admin (Admin > Weekly) and paid by the admin with one button after the period is over. */
 const maskPhone = p => p ? String(p).slice(0, 3) + '****' + String(p).slice(-2) : '';
 const prizesOf = async env => { try { const a = JSON.parse(await getSet(env, 'wk_prizes') || '[]'); return Array.isArray(a) ? a.slice(0, 10).map(x => Math.max(0, Number(x) || 0)) : [] } catch (e) { return [] } };
 const wkTop = (env, wk, n) => env.DB.prepare('SELECT g.user_id id,u.name n,u.phone ph,g.games g FROM wk_games g JOIN users u ON u.id=g.user_id WHERE g.week=?1 ORDER BY g.games DESC,g.user_id LIMIT ?2').bind(wk, n).all().then(r => r.results);
@@ -570,12 +577,15 @@ const wkRows = (top, pr) => top.map((x, i) => ({ rank: i + 1, name: x.n, phone: 
 let wkCache = { w: 0, t: 0, top: [] }; // the top 10 is cached for 15 seconds so opening the Scores tab is cheap
 async function weeklyBoard(env, u) {
   await ensureTables(env);
-  const db = env.DB, now = Date.now(), wk = weekStart(now), pr = await prizesOf(env);
-  if (wkCache.w !== wk || now - wkCache.t > 15000) wkCache = { w: wk, t: now, top: await wkTop(env, wk, 10) };
-  const mine = await db.prepare('SELECT games g FROM wk_games WHERE week=?1 AND user_id=?2').bind(wk, u.id).first(), mg = mine ? mine.g : 0;
-  const higher = mg ? (await db.prepare('SELECT COUNT(*) c FROM wk_games WHERE week=?1 AND (games>?2 OR (games=?2 AND user_id<?3))').bind(wk, mg, u.id).first()).c : 0;
-  const rank = mg ? higher + 1 : null;
-  const lp = await db.prepare('SELECT week,ts FROM wk_paid ORDER BY week DESC LIMIT 1').first();
+  const db = env.DB, now = Date.now(), wc = await wkCfg(env), run = wkRunning(wc, now), wk = wc.start, pr = await prizesOf(env);
+  let mg = 0, rank = null;
+  if (run) {
+    if (wkCache.w !== wk || now - wkCache.t > 15000) wkCache = { w: wk, t: now, top: await wkTop(env, wk, 10) };
+    const mine = await db.prepare('SELECT games g FROM wk_games WHERE week=?1 AND user_id=?2').bind(wk, u.id).first(); mg = mine ? mine.g : 0;
+    const higher = mg ? (await db.prepare('SELECT COUNT(*) c FROM wk_games WHERE week=?1 AND (games>?2 OR (games=?2 AND user_id<?3))').bind(wk, mg, u.id).first()).c : 0;
+    rank = mg ? higher + 1 : null;
+  }
+  const lp = await db.prepare('SELECT week,ts FROM wk_paid ORDER BY ts DESC LIMIT 1').first();
   let last = null, won = null;
   if (lp) {
     const w = (await db.prepare('SELECT pos,name,prize_c,games FROM wk_winners WHERE week=? ORDER BY pos').bind(lp.week).all()).results;
@@ -583,7 +593,7 @@ async function weeklyBoard(env, u) {
     const mw = await db.prepare('SELECT pos,prize_c,games FROM wk_winners WHERE week=? AND user_id=?').bind(lp.week, u.id).first();
     if (mw && lp.ts > now - 7 * 864e5) won = { rank: mw.pos, prize: B(mw.prize_c), games: mw.games }; // shown as a congratulations card for 7 days
   }
-  return { period: 'weekly', top: wkRows(wkCache.top, pr), me: { rank, played: mg, prize: rank && rank <= 10 ? pr[rank - 1] || 0 : 0 }, ends_ts: wk + 7 * 864e5, now, prizes_on: pr.some(x => x > 0), last, won };
+  return { period: 'weekly', active: run, top: run ? wkRows(wkCache.top, pr) : [], me: { rank, played: mg, prize: rank && rank <= 10 ? pr[rank - 1] || 0 : 0 }, ends_ts: run ? wc.end : 0, now, prizes_on: pr.some(x => x > 0), last, won };
 }
 async function leaderboard(env, u, period) {
   if (period === 'weekly') return weeklyBoard(env, u);
@@ -857,11 +867,30 @@ async function adminRoute(req, env, url) {
     const r = (await db.prepare('SELECT ts,actor,action,detail FROM admin_log ORDER BY id DESC LIMIT 30').all()).results;
     return J({ items: r });
   }
-  if (name === 'weekly') { // this week (live) and last week (can be paid once)
-    const wk = weekStart(), lw = wk - 7 * 864e5, pr = await prizesOf(env);
-    const paid = !!(await db.prepare('SELECT 1 x FROM wk_paid WHERE week=?').bind(lw).first());
-    return J({ prizes: pr, ends_ts: wk + 7 * 864e5, now: Date.now(),
-      this_week: wkRows(await wkTop(env, wk, 10), pr), last_week: wkRows(await wkTop(env, lw, 10), pr), last_paid: paid });
+  if (name === 'weekly') { // the weekly bonus: ON/OFF state, this period (live) and the finished period (can be paid once)
+    const wc = await wkCfg(env), now = Date.now(), run = wkRunning(wc, now), pr = await prizesOf(env), fin = wc.start > 0 && !run;
+    const paid = fin ? !!(await db.prepare('SELECT 1 x FROM wk_paid WHERE week=?').bind(wc.start).first()) : false;
+    return J({ prizes: pr, running: run, start_ts: wc.start, ends_ts: wc.end, now,
+      this_week: run ? wkRows(await wkTop(env, wc.start, 10), pr) : [], last_week: fin ? wkRows(await wkTop(env, wc.start, 10), pr) : [], last_paid: paid });
+  }
+  if (name === 'wk-start') { // the admin switches the weekly bonus ON now; it runs for the chosen number of days (default 7) or until "Stop now"
+    const wc = await wkCfg(env), now = Date.now();
+    if (wkRunning(wc, now)) return J({ error: 'already_on' }, 409);
+    if (wc.start > 0) { // do not lose the previous period: if it has prizes and players but was never paid, the admin must pay it first (or clear the prizes)
+      const pr = await prizesOf(env);
+      if (pr.some(x => x > 0) && !(await db.prepare('SELECT 1 x FROM wk_paid WHERE week=?').bind(wc.start).first()) && (await wkTop(env, wc.start, 1)).length) return J({ error: 'pay_first' }, 409);
+    }
+    const days = Math.min(30, Math.max(1, Math.floor(Number(b.days) || 7)));
+    await setSet(env, 'wk_cfg', JSON.stringify({ on: true, start: now, end: now + days * 864e5 })); wkCache = { w: 0, t: 0, top: [] };
+    await log('start weekly bonus', days + ' days');
+    return J({ ok: true, days });
+  }
+  if (name === 'wk-stop') { // the admin switches the weekly bonus OFF now; games stop counting and the finished period can be paid
+    const wc = await wkCfg(env), now = Date.now();
+    if (!wkRunning(wc, now)) return J({ error: 'not_on' }, 409);
+    await setSet(env, 'wk_cfg', JSON.stringify({ on: false, start: wc.start, end: now })); wkCache = { w: 0, t: 0, top: [] };
+    await log('stop weekly bonus', '');
+    return J({ ok: true });
   }
   if (name === 'set-prizes') { // "3000, 2000, 1000, 500, 500 ..." = prize for rank 1, 2, 3 ... (up to 10). Empty = no prizes.
     const parts = String(b.prizes ?? '').split(/[\s,;]+/).filter(Boolean), pr = [];
@@ -870,13 +899,15 @@ async function adminRoute(req, env, url) {
     await setSet(env, 'wk_prizes', JSON.stringify(pr)); await log('set weekly prizes', pr.join(', ') || 'none');
     return J({ ok: true, prizes: pr });
   }
-  if (name === 'pay-weekly') { // pays LAST week's top players (a week can only be paid once) and sends each one a congratulations message
-    const lw = weekStart() - 7 * 864e5, pr = await prizesOf(env);
+  if (name === 'pay-weekly') { // pays the FINISHED period's top players (a period can only be paid once) and sends each one a congratulations message
+    const wc = await wkCfg(env), now = Date.now();
+    if (!(wc.start > 0) || wkRunning(wc, now)) return J({ error: 'wk_running' }, 409); // the weekly bonus must be stopped (or finished) first
+    const lw = wc.start, pr = await prizesOf(env);
     if (!pr.some(x => x > 0)) return J({ error: 'no_prizes' }, 400);
     const win = (await wkTop(env, lw, pr.length)).map((x, i) => ({ pos: i + 1, id: x.id, name: x.n, games: x.g, prize_c: C(pr[i] || 0) })).filter(x => x.prize_c > 0);
     if (!win.length) return J({ error: 'no_winners' }, 409);
     try {
-      await db.batch([db.prepare('INSERT INTO wk_paid(week,ts) VALUES(?,?)').bind(lw, Date.now()), // fails if this week was already paid, so nothing below is applied
+      await db.batch([db.prepare('INSERT INTO wk_paid(week,ts) VALUES(?,?)').bind(lw, Date.now()), // fails if this period was already paid, so nothing below is applied
         ...win.map(x => db.prepare('INSERT INTO wk_winners(week,pos,user_id,name,prize_c,games) VALUES(?,?,?,?,?,?)').bind(lw, x.pos, x.id, x.name, x.prize_c, x.games)),
         ...win.map(x => db.prepare('UPDATE users SET balance=balance+? WHERE id=?').bind(x.prize_c, x.id))]);
     } catch (e) { return J({ error: 'already_paid' }, 409) }
