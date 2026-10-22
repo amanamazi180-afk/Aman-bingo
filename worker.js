@@ -1,7 +1,7 @@
 // Aman Bingo server — Cloudflare Worker + D1 database + one Durable Object (GameHub) that runs the live game.
 // Money is stored in cents (birr x 100). Variables to set in Cloudflare:
 //   BOT_TOKEN, ADMIN_TG_ID, SMS_SECRET, TG_SECRET, ADMIN_KEY, VERIFYET_KEY (secrets) · GAME_URL, ALLOW_ORIGIN, STAKE (plain variables)
-//   Optional: BOT_USERNAME, WELCOME_BONUS, DAILY_BONUS, ADMIN_URL, PROMO_PHOTO, VERIFYET_MIN, VERIFYET_AUTO_MAX, FIRST_DEP_MAX, VET_DAILY_MAX, SMS_SENDERS
+//   Optional: ALLOW_MANUAL_DEPOSIT (1 = admin may approve deposits by hand; default LOCKED), BOT_USERNAME, WELCOME_BONUS, DAILY_BONUS, ADMIN_URL, PROMO_PHOTO, VERIFYET_MIN, VERIFYET_AUTO_MAX, FIRST_DEP_MAX, VET_DAILY_MAX, SMS_SENDERS
 // wrangler.json needs the HUB binding + migration for GameHub (see the two blocks given with this file).
 // DEPOSIT BANKS (bot + game wallet): Telebirr, BOA, M-Pesa, E-birr (our accounts; the admin edits numbers, names and pictures in Admin > Accounts).
 // WITHDRAW BANKS (where a player can receive money): CBE, Dashen, Oromia, Awash, BOA, M-Pesa, Telebirr, E-birr (WD_BANKS below).
@@ -223,6 +223,7 @@ async function tryMatch(env, txid) { // credit a pending deposit when a matching
 }
 async function decideDeposit(env, id, ok) {
   const db = env.DB;
+  if (ok && !manualDep(env)) return false; // safety: no manual approval of deposits while it is locked
   const r = await db.batch(ok ? [
     db.prepare("UPDATE users SET balance=balance+(SELECT amount_c FROM deposits WHERE id=?1 AND status='pending') WHERE id=(SELECT user_id FROM deposits WHERE id=?1 AND status='pending')").bind(id),
     db.prepare("UPDATE deposits SET status='approved',note='admin' WHERE id=?1 AND status='pending'").bind(id)
@@ -300,7 +301,8 @@ async function autoApprove(env, id) {
   return false;
 }
 // buttons under a pending deposit message for the admin (the verify.et button only where verify.et can check that bank)
-const depKb = (env, id, bank) => { const r = [{ text: '✅ አጽድቅ', callback_data: 'da:' + id }, { text: '❌ ውድቅ', callback_data: 'dr:' + id }]; return env.VERIFYET_KEY && VET_BANK[bank] ? [r, [{ text: '🔎 verify.et እንደገና ፈትሽ', callback_data: 'dv:' + id }]] : [r] };
+const manualDep = env => env.ALLOW_MANUAL_DEPOSIT === '1'; // manual deposit approval is LOCKED by default: a deposit is credited only by the SMS match or verify.et. Set ALLOW_MANUAL_DEPOSIT=1 in Cloudflare to allow the admin Approve button again.
+const depKb = (env, id, bank) => { const r = manualDep(env) ? [{ text: '✅ አጽድቅ', callback_data: 'da:' + id }, { text: '❌ ውድቅ', callback_data: 'dr:' + id }] : [{ text: '❌ ውድቅ', callback_data: 'dr:' + id }]; return env.VERIFYET_KEY && VET_BANK[bank] ? [r, [{ text: '🔎 verify.et እንደገና ፈትሽ', callback_data: 'dv:' + id }]] : [r] };
 // the admin presses "verify.et": run the whole check again for one pending deposit; credits it only if every automatic rule passes
 async function recheckDeposit(env, id) {
   const db = env.DB, d = await db.prepare("SELECT d.*,u.name,u.phone,u.created_ts FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.id=? AND d.status='pending'").bind(id).first();
@@ -324,7 +326,7 @@ async function makeDeposit(env, u, amt, txid, method) {
   let ok = await tryMatch(env, txid);
   const vmax = vetMax(env);
   if (!ok && !gate.hold && gate.verdict === 'ok' && vmax > 0 && C(amt) <= C(vmax)) ok = await autoApprove(env, id); // second way to be credited automatically: verify.et confirmed it
-  if (!ok) await notifyAdmins(env, depositText({ id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid, held: gate.hold, flags: await depositChecks(env, u, { amount_c: C(amt), method, txid }, gate) }), depKb(env, id, method));
+  if (!ok) await notifyAdmins(env, depositText({ manual: env.ALLOW_MANUAL_DEPOSIT, id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid, held: gate.hold, flags: await depositChecks(env, u, { amount_c: C(amt), method, txid }, gate) }), depKb(env, id, method));
   return { status: ok ? 'approved' : 'pending', id, held: !!gate.hold };
 }
 // Fake-text scan. Money is credited automatically ONLY when the real bank SMS (forwarded by the SMS app) has the same transaction number AND the same amount, so a made-up or edited text can never add balance by itself.
@@ -760,6 +762,7 @@ async function onTelegram(env, up) {
     if (a === 'm' || a === 'b') return onPlayerCb(env, q, parts);
     if (!(await isAdmin(env, q.from.id))) return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: 'ለአስተዳዳሪ ብቻ' });
     if (a === 'dv') { const r = await recheckDeposit(env, +id); return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: r.text.slice(0, 190), show_alert: true }) } // "🔎 verify.et" button: check this pending deposit again
+    if (a === 'da' && !manualDep(env)) return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: '🔒 በእጅ ማጽደቅ ተዘግቷል — ገቢው በSMS ወይም በverify.et ሲረጋገጥ ብቻ ይጨመራል።', show_alert: true });
     const ok = a === 'da' ? await decideDeposit(env, +id, true) : a === 'dr' ? await decideDeposit(env, +id, false) : a === 'wp' ? await decideWithdraw(env, +id, true) : a === 'wr' ? await decideWithdraw(env, +id, false) : false;
     await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: ok ? 'ተጠናቋል' : 'ቀድሞ ተከናውኗል' });
     return tg(env, 'editMessageText', { chat_id: q.message.chat.id, message_id: q.message.message_id, text: q.message.text + (ok ? '\n\n✔ ተጠናቋል' : '\n\n(ቀድሞ ተከናውኗል)') });
@@ -788,7 +791,7 @@ async function onTelegram(env, up) {
   if (cmd === '/pending' && await isAdmin(env, uid)) {
     const d = (await db.prepare("SELECT d.*,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending'").all()).results, w = (await db.prepare("SELECT w.*,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status='pending'").all()).results;
     if (!d.length && !w.length) return say(env, uid, 'በመጠባበቅ ላይ ያለ ምንም ጥያቄ የለም ✅');
-    for (const x of d) await say(env, uid, depositText(x), depKb(env, x.id, x.method));
+    for (const x of d) await say(env, uid, depositText({ ...x, manual: env.ALLOW_MANUAL_DEPOSIT }), depKb(env, x.id, x.method));
     for (const x of w) { x.info = await wdInfo(env, x.user_id).catch(() => ''); await say(env, uid, withdrawText(x), [[{ text: '💸 ተከፍሏል', callback_data: 'wp:' + x.id }, { text: '↩️ ውድቅ', callback_data: 'wr:' + x.id }]]) }
     return;
   }
@@ -833,7 +836,7 @@ async function onTelegram(env, up) {
   if (cmd === '/instruction') return menuAction(env, u, 'ins');
   return sendMenu(env, uid, '🎮 እንኳን ደህና መጡ! ከታች ካሉት አማራጮች ይምረጡ።');
 }
-const depositText = x => `💰 ገቢ #${x.id}\n${x.name} · ${x.phone}\nመጠን: ${B(x.amount_c)} ብር በ ${x.method}\nየግብይት ቁጥር: ${x.txid}\n` + (x.held ? 'ራስ-ሰር አልተጨመረም — ለእርስዎ ማረጋገጫ ተይዟል። ገንዘቡ በእርግጥ መድረሱን በባንክ አፕዎ ካረጋገጡ ብቻ ያጽድቁ።' : 'የሚዛመድ SMS ገና አልደረሰም — SMS ሲደርስ በራስ-ሰር ይጨመራል፤ ገንዘቡ በእርግጥ መድረሱን ካረጋገጡ ብቻ በእጅ ያጽድቁ።') + (x.flags ? '\n\n🔎 ምርመራ፦\n' + x.flags : '');
+const depositText = x => `💰 ገቢ #${x.id}\n${x.name} · ${x.phone}\nመጠን: ${B(x.amount_c)} ብር በ ${x.method}\nየግብይት ቁጥር: ${x.txid}\n` + (x.held ? 'ራስ-ሰር አልተጨመረም — ለእርስዎ ማረጋገጫ ተይዟል። ገንዘቡ በእርግጥ መድረሱን በባንክ አፕዎ ካረጋገጡ ብቻ ያጽድቁ።' : 'የሚዛመድ SMS ገና አልደረሰም — SMS ሲደርስ በራስ-ሰር ይጨመራል፤ ገንዘቡ በእርግጥ መድረሱን ካረጋገጡ ብቻ በእጅ ያጽድቁ።') + (manualDep({ ALLOW_MANUAL_DEPOSIT: x.manual }) ? '' : '\n\n🔒 በእጅ ማጽደቅ ተዘግቷል — ገቢው በSMS ወይም በverify.et ሲረጋገጥ ብቻ ይጨመራል።') + (x.flags ? '\n\n🔎 ምርመራ፦\n' + x.flags : '');
 const notifyAdmins = async (env, text, kb) => Promise.all((await admins(env)).map(a => say(env, a, text, kb)));
 const withdrawText = x => `💸 ወጪ #${x.id}\n${x.name} · ${x.phone}\nመጠን: ${B(x.amount_c)} ብር\nይላክ ወደ: ${x.method} ${x.account}` + (x.info ? '\n\n' + x.info : '');
 
@@ -872,7 +875,7 @@ async function adminRoute(req, env, url) {
     for (const x of w) x.info = await wdInfo(env, x.user_id).catch(() => '');
     const hist = (await db.prepare("SELECT 'deposit' type,d.amount_c,d.method detail,d.status,d.ts,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status IN('approved','rejected') AND d.ts>? UNION ALL SELECT 'withdraw',w.amount_c,w.method||' '||w.account,w.status,w.ts,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status IN('paid','rejected') AND w.ts>? ORDER BY ts DESC LIMIT 60").bind(Date.now() - 864e5, Date.now() - 864e5).all().catch(() => ({ results: [] }))).results;
     return J({ items: [
-      ...d.map(x => ({ type: 'deposit', id: x.id, amount: B(x.amount_c), name: x.name, phone: x.phone, can_vet: !!(env.VERIFYET_KEY && VET_BANK[x.method]), detail: x.method + ' · tx ' + x.txid + (x.sms_c == null ? ' · ❌ no matching bank SMS yet' : x.sms_c !== x.amount_c ? ' · 🚨 real SMS says ' + B(x.sms_c) + ' birr (claimed ' + B(x.amount_c) + ')' : ' · ✅ SMS matches') + (x.vet ? ' · 🔎 ' + x.vet : '') })),
+      ...d.map(x => ({ type: 'deposit', id: x.id, amount: B(x.amount_c), name: x.name, phone: x.phone, can_vet: !!(env.VERIFYET_KEY && VET_BANK[x.method]), manual: manualDep(env), detail: x.method + ' · tx ' + x.txid + (x.sms_c == null ? ' · ❌ no matching bank SMS yet' : x.sms_c !== x.amount_c ? ' · 🚨 real SMS says ' + B(x.sms_c) + ' birr (claimed ' + B(x.amount_c) + ')' : ' · ✅ SMS matches') + (x.vet ? ' · 🔎 ' + x.vet : '') })),
       ...w.map(x => ({ type: 'withdraw', id: x.id, amount: B(x.amount_c), name: x.name, phone: x.phone, detail: 'send to ' + x.method + ' ' + x.account + (x.info ? ' · ' + x.info.replace(/\n\s*/g, ' · ') : '') }))
     ], history: hist.map(h => ({ type: h.type, amount: B(h.amount_c), name: h.name, phone: h.phone, detail: h.detail, status: h.status, ts: h.ts })) });
   }
@@ -884,6 +887,7 @@ async function adminRoute(req, env, url) {
   if (name === 'approve' || name === 'reject') {
     const id = Math.floor(Number(b.id)); if (!(id > 0)) return J({ error: 'bad_input' }, 400);
     const ok = name === 'approve'; let done;
+    if (ok && b.type === 'deposit' && !manualDep(env)) return J({ error: 'manual_off' }, 409);
     if (b.type === 'deposit') done = await decideDeposit(env, id, ok);
     else if (b.type === 'withdraw') done = await decideWithdraw(env, id, ok); // approve = mark paid, reject = refund balance
     else return J({ error: 'bad_input' }, 400);
