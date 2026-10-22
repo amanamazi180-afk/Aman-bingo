@@ -40,6 +40,7 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 .acc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0;display:flex;flex-direction:column;gap:8px}
 .acc h3{margin:0;font-size:16px;color:var(--gold)}
 .todaytag{color:var(--ok);font-size:12px;font-weight:600}
+.vet{color:var(--ok);font-size:12px;font-weight:600}
 </style>
 </head>
 <body>
@@ -94,7 +95,8 @@ function fileToJpeg(file, max){ return new Promise((ok, no) => { const fr = new 
 function list(items, fn){ return items && items.length ? items.map(fn).join("") : '<div class="empty">Nothing here yet.</div>'; }
 
 const BANKNAME = { telebirr:"Telebirr", boa:"Bank of Abyssinia (BOA)", mpesa:"M-Pesa", ebirr:"E-birr", cbe:"CBE", dashen:"Dashen" };
-const HOW = { auto:"auto (SMS match)", admin:"approved by admin", "verify.et":"verify.et" };
+// how a deposit was credited: shown in the Deposits list and in the history
+const HOW = { auto:"✅ approved by SMS match", sms:"✅ approved by SMS match", "verify.et":"✅ approved by verify.et", "sms+verify.et":"✅ approved by SMS + verify.et", admin:"approved by admin" };
 
 const views = {
   async Overview(){
@@ -105,18 +107,18 @@ const views = {
       ? `<div class="card tap" data-a="${a}" role="button" tabindex="0"><b data-a="${a}">${esc(v ?? 0)}</b><span data-a="${a}">${l}</span><span data-a="${a}">Tap to see the last 100 deposits ›</span></div>`
       : `<div class="card"><b>${esc(v ?? 0)}</b><span>${l}</span></div>`).join("") + "</div>";
   },
-  async Deposits(){ // last 100 credited deposits with the player name (opened from the Overview card)
+  async Deposits(){ // last 100 credited deposits with the player name and HOW each was approved (opened from the Overview card)
     const d = await call("/api/admin/deposits");
     const today = d.today_ts || 0;
     const head = `<div class="row"><button data-a="back-overview">‹ Overview</button><b>Last ${esc(d.items.length)} deposits</b></div>`;
-    return head + list(d.items, x => `<div class="row"><div><b>${esc(x.name)}</b>${x.ts >= today ? ' <span class="todaytag">· today</span>' : ''}<small>${esc(x.phone)} · ${esc(BANKNAME[x.method] || x.method)}${x.how ? " · " + esc(HOW[x.how] || x.how) : ""}</small><small>${esc(new Date(x.ts).toLocaleString())}</small></div><b class="won">${esc(x.amount)} birr</b></div>`);
+    return head + list(d.items, x => `<div class="row"><div><b>${esc(x.name)}</b>${x.ts >= today ? ' <span class="todaytag">· today</span>' : ''}<small>${esc(x.phone)} · ${esc(BANKNAME[x.method] || x.method)}</small>${x.how ? `<small class="${/verify\.et/.test(x.how) ? "vet" : ""}" style="${/verify\.et/.test(x.how) ? "" : "color:var(--mut)"}">${esc(HOW[x.how] || x.how)}</small>` : ""}<small>${esc(new Date(x.ts).toLocaleString())}</small></div><b class="won">${esc(x.amount)} birr</b></div>`);
   },
   async Pending(){
     const d = await call("/api/admin/pending");
     const lbl = { approved:"✅ Approved", paid:"✅ Paid", rejected:"❌ Rejected" };
     const hist = d.history || [];
     return list(d.items, p => `<div class="row"><div><b>${esc(p.type)} ${esc(p.amount)} birr</b><small>${esc(p.name)} · ${esc(p.phone)}</small><small>${esc(p.detail)}</small></div>
-      <div class="acts"><button class="ok" data-a="approve" data-type="${esc(p.type)}" data-id="${esc(p.id)}">${p.type==="withdraw"?"Mark paid":"Approve"}</button><button class="bad" data-a="reject" data-type="${esc(p.type)}" data-id="${esc(p.id)}">Reject</button></div></div>`)
+      <div class="acts">${p.type==="deposit" && p.can_vet ? `<button data-a="recheck" data-id="${esc(p.id)}">🔎 verify.et</button>` : ""}<button class="ok" data-a="approve" data-type="${esc(p.type)}" data-id="${esc(p.id)}">${p.type==="withdraw"?"Mark paid":"Approve"}</button><button class="bad" data-a="reject" data-type="${esc(p.type)}" data-id="${esc(p.id)}">Reject</button></div></div>`)
       + `<h2 style="font-size:16px;margin:20px 0 2px">History · last 24 hours</h2><small style="color:var(--mut)">Handled requests stay here for 24 hours and then disappear from this list.</small>`
       + (hist.length ? hist.map(h => `<div class="row"><div><b>${esc(h.type)} ${esc(h.amount)} birr</b><small>${esc(h.name)} · ${esc(h.phone)}</small><small>${esc(h.detail)}</small></div><small style="text-align:right"><b>${lbl[h.status] || esc(h.status)}</b><br>${esc(new Date(h.ts).toLocaleString())}</small></div>`).join("") : '<div class="empty">No handled requests in the last 24 hours.</div>');
   },
@@ -234,6 +236,11 @@ $("view").onclick = async e => {
     if(a==="deposits"){ tab="Deposits"; return show(); }
     if(a==="back-overview"){ tab="Overview"; return show(); }
     if(a==="search"){ q=$("q").value.trim(); return show(); }
+    if(a==="recheck"){ // 🔎 verify.et: check this pending deposit again; it is credited only if every automatic safety rule passes
+      say("Checking with verify.et… (up to 10 seconds)");
+      const r = await call("/api/admin/recheck", {id});
+      say(r.text, r.ok ? "good" : "err"); setTimeout(show, r.ok ? 1200 : 4000); return;
+    }
     if(a==="approve"||a==="reject"){
       const r = await call("/api/admin/"+a, {id, type:el.dataset.type});
       if(r.ok===false){ say("Already processed.", "err"); setTimeout(show, 800); return; }
