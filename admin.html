@@ -59,7 +59,7 @@ nav button{white-space:nowrap}nav button.on{border-color:var(--gold);color:var(-
 // Same address the page is opened from. The old github.io page still talks to the Worker directly.
 const API = location.hostname.endsWith("github.io") ? "https://aman-bingo.amanamazi180.workers.dev" : "";
 const TABS = ["Overview","Pending","Players","Rounds","Game","AutoTake","Accounts","Bonus","Weekly","Log"];
-let q = "";
+let q = "", pre = null; // pre = the first Overview answer fetched at sign-in (not fetched twice)
 const tgd = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) || "";
 if(tgd){ try{ Telegram.WebApp.ready(); Telegram.WebApp.expand(); }catch(e){} }
 let key = sessionStorage.getItem("ak") || "", tab = "Overview";
@@ -71,9 +71,10 @@ function say(t, kind){ const m=$("msg"); m.textContent=t; m.className=kind||""; 
 async function call(path, body){
   const opt = { headers:{ "X-Admin-Key": key, "X-Init-Data": tgd, "Content-Type":"application/json" } };
   if(body){ opt.method="POST"; opt.body=JSON.stringify(body); }
-  let r;
+  let r; const ac = new AbortController(), tm = setTimeout(() => ac.abort(), 20000); opt.signal = ac.signal;
   try { r = await fetch(API + path, opt); }
-  catch(e){ throw new Error("Cannot reach " + (API || location.origin) + path + ". The Worker is down or the address is wrong."); }
+  catch(e){ throw new Error(e && e.name === "AbortError" ? "The server is slow right now. Tap the tab again." : "Cannot reach " + (API || location.origin) + path + ". The Worker is down or the address is wrong."); }
+  finally { clearTimeout(tm); }
   if(r.status===401||r.status===403) throw new Error("Wrong admin password.");
   if(r.status===404) throw new Error("The Worker has no route " + path + ". Add this route to worker.js.");
   if(!r.ok){
@@ -100,7 +101,7 @@ const HOW = { auto:"✅ approved by SMS match", sms:"✅ approved by SMS match",
 
 const views = {
   async Overview(){
-    const d = await call("/api/admin/overview");
+    const d = pre || await call("/api/admin/overview"); pre = null;
     // the "Deposits today (count)" card is a button: it opens the list of the last 100 deposits with the player names
     const stats = [["Players",d.players],["Deposits today (birr)",d.deposits_today],["Deposits today (count)",d.deposits_today_count,"deposits"],["Deposits all time (birr)",d.deposits],["Withdrawals paid (birr)",d.withdrawals],["Player balances (birr)",d.held],["Pending requests",d.pending],["Rounds played",d.rounds]];
     return '<div class="grid">' + stats.map(([l,v,a])=> a
@@ -304,12 +305,12 @@ $("view").onclick = async e => {
 $("view").addEventListener("keydown", e => { if(e.target.id==="q" && e.key==="Enter"){ q=e.target.value.trim(); show(); } if(e.key==="Enter" && e.target.classList && e.target.classList.contains("tap")) e.target.click(); });
 $("go").onclick = async () => {
   key = $("key").value.trim(); if(!key) return say("Enter the admin password.", "err");
-  try { await call("/api/admin/overview"); sessionStorage.setItem("ak", key); $("login").hidden=true; $("app").hidden=false; show(); }
+  try { pre = await call("/api/admin/overview"); sessionStorage.setItem("ak", key); $("login").hidden=true; $("app").hidden=false; show(); }
   catch(e){ say(e.message, "err"); }
 };
 $("key").addEventListener("keydown", e => { if(e.key==="Enter") $("go").click(); });
 if(key){ $("key").value=key; $("go").click(); }
-else if(tgd){ call("/api/admin/overview").then(()=>{ $("login").hidden=true; $("app").hidden=false; show(); }).catch(()=>{}); }
+else if(tgd){ call("/api/admin/overview").then(r=>{ pre = r; $("login").hidden=true; $("app").hidden=false; show(); }).catch(()=>{}); }
 </script>
 </body>
 </html>

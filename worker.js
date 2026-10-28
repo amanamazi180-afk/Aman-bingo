@@ -1,45 +1,32 @@
-// Aman Bingo server — Cloudflare Worker + D1 database + one Durable Object (GameHub) that runs the live game.
+// Aman Bingo server — Cloudflare Worker + D1 database + Durable Object (GameHub) that runs the live game.
 // Money is stored in cents (birr x 100). Variables to set in Cloudflare:
 //   BOT_TOKEN, ADMIN_TG_ID, SMS_SECRET, TG_SECRET, ADMIN_KEY, VERIFYET_KEY (secrets) · GAME_URL, ALLOW_ORIGIN, STAKE (plain variables)
-//   Optional: ALLOW_MANUAL_DEPOSIT (1 = admin may approve deposits by hand; default LOCKED), BOT_USERNAME, WELCOME_BONUS, DAILY_BONUS, ADMIN_URL, PROMO_PHOTO, VERIFYET_MIN, VERIFYET_AUTO_MAX, FIRST_DEP_MAX, VET_DAILY_MAX, SMS_SENDERS
-// wrangler.json needs the HUB binding + migration for GameHub (see the two blocks given with this file).
-// DEPOSIT BANKS (bot + game wallet): Telebirr, BOA, M-Pesa, E-birr (our accounts; the admin edits numbers, names and pictures in Admin > Accounts).
-// WITHDRAW BANKS (where a player can receive money): CBE, Dashen, Oromia, Awash, BOA, M-Pesa, Telebirr, E-birr (WD_BANKS below).
-// WIN RULES: a full line (row, column or diagonal) OR the 4 CORNERS of the cartela (top-left, top-right, bottom-left, bottom-right) wins (see hasBingo below).
-// ============================ DEPOSIT GUARD (the safest way to credit money) ============================
-// A deposit is credited AUTOMATICALLY only when one of these is true, and NEVER when a safety rule holds it for the admin:
-//   (1) SMS MATCH: the bank SMS forwarded from OUR phone to POST /sms has the same transaction number AND the same amount as the player's claim.
-//       The SMS is accepted only if its sender is a bank (not a normal mobile number; or exactly one of SMS_SENDERS when you set that list) so a fake SMS typed by a player's friend cannot be credited.
-//   (2) VERIFY.ET: for Telebirr / M-Pesa, verify.et says the receipt is real + paid to OUR account + the same amount + not older than 72 hours.
-//   If both agree the admin message says "Approved by SMS + verify.et".
-// HELD for the admin (never automatic): verify.et clearly disagrees · amount above VERIFYET_AUTO_MAX (default 1000) for the verify.et way · a FIRST deposit above FIRST_DEP_MAX (default 1000)
-//   · a player with 2 or more rejected deposits · more than VET_DAILY_MAX (default 3000) credited by verify.et alone in 24 hours · more than 3 pending requests.
-// APPROVE BUTTON: the "✅ አጽድቅ" button is shown to the admin ONLY for a HELD deposit (the automatic credit was blocked and the admin must decide). Every other pending deposit shows only ❌ ውድቅ (+ 🔎 verify.et)
-//   unless ALLOW_MANUAL_DEPOSIT=1. A deposit that is not held cannot be approved by hand (see isHeld / heldById).
-// Every automatic credit sends the admins a message: "✅ Approved by verify.et" / "✅ Approved by SMS match" / "✅ Approved by SMS + verify.et".
-// The admin can press "🔎 verify.et" on any pending deposit (bot message or Admin > Pending) to check it again.
-// A withdrawal request shows the admin the player's deposit history (how much, and how it was approved) before money is sent.
-// ======================================================================================================
-// SECRET BONUS: the admin chooses cartela numbers for one round (Admin > Bonus). The player who takes one of them wins the bonus at once and is announced to everybody.
-// In a bonus round every taken cartela is locked (nobody can drop or change it), and the secret cartela numbers are never sent to the phones.
-// WEEKLY BONUS (top 1-10 players): the ADMIN decides when it starts and stops (Admin > Weekly > "Start weekly bonus now" / "Stop now"). While it is ON (default 7 days, the admin can choose 1-30 days),
-//   players are ranked by games played since the start; while it is OFF no games are counted and the Scores tab says it has not started. The admin sets the prizes (Admin > Weekly) and pays the finished period's winners with one button (once per period).
-// BOTTOM KEYBOARD: the bot shows a permanent keyboard under the chat box (ጨዋታ ተጫወት, ገንዘብ አስገባ, ቀሪ ሂሳብ) after /start and after registration.
-// LANGUAGE: every message and button the bot sends is in Amharic. CARTELAS: 1 to 600 (TOTAL below).
-// ACCOUNTS: the admin edits the deposit accounts (number, name, picture) in Admin > Accounts; the bot and the game wallet use them at once.
-// WINNER MESSAGE: when a round ends, every winner gets a bot message "ዙር <round> አሸናፊ ሆነዋል ብር = <prize>" (sent once, from settle()).
-// AUTO-TAKE: Admin > AutoTake switches on automatic taking of N random cartelas every round for the support account; a win pays the support account (see autoTake() below).
-// RELIABILITY: a short database hiccup while taking / dropping a cartela is retried once (retryDb) so players do not see "server problem". Telegram messages after money moves are AWAITED so they are never cut off.
-// DEPOSITS LIST: Admin > Overview > tap "Deposits today (count)" opens the last 100 credited deposits with the player name (route /api/admin/deposits).
+//   Optional: ALLOW_MANUAL_DEPOSIT (1 = admin may approve deposits by hand; default LOCKED), BOT_USERNAME, DAILY_BONUS, ADMIN_URL, PROMO_PHOTO, VERIFYET_MIN, VERIFYET_AUTO_MAX, FIRST_DEP_MAX, VET_DAILY_MAX, SMS_SENDERS
+// wrangler.json needs the HUB binding + migration for GameHub (unchanged).
+// NO WELCOME BONUS: a new player gets nothing when registering, only the message "እንኳን ደስ አሎት ተመዝግበዋል" with the play buttons.
+// DEPOSIT BANKS (bot + game wallet): Telebirr, BOA, M-Pesa, E-birr (the admin edits numbers, names and pictures in Admin > Accounts).
+// WITHDRAW BANKS: CBE, Dashen, Oromia, Awash, BOA, M-Pesa, Telebirr, E-birr (WD_BANKS below).
+// WIN RULES: a full line (row, column or diagonal) OR the 4 CORNERS of the cartela wins (see hasBingo below).
+// DEPOSIT GUARD: a deposit is credited AUTOMATICALLY only by (1) a matching bank SMS forwarded to POST /sms (same transaction number AND amount, sender must be a bank)
+//   or (2) verify.et (Telebirr / M-Pesa: real receipt + paid to OUR account + same amount + not older than 72 hours). A deposit is HELD for the admin when verify.et disagrees,
+//   the amount is above VERIFYET_AUTO_MAX (default 1000) for the verify.et way, it is a FIRST deposit above FIRST_DEP_MAX (default 1000), the player has 2+ rejected deposits,
+//   more than VET_DAILY_MAX (default 3000) was credited by verify.et alone in 24 h, or there are more than 3 pending requests. The "✅ አጽድቅ" button is shown ONLY for a HELD deposit
+//   (unless ALLOW_MANUAL_DEPOSIT=1). Every automatic credit tells the admins "Approved by verify.et / SMS match / SMS + verify.et".
+// SECRET BONUS (Admin > Bonus), WEEKLY BONUS (Admin > Weekly), AUTO-TAKE (Admin > AutoTake), ACCOUNTS (Admin > Accounts), DEPOSITS LIST (Admin > Overview) work as before.
+// SPEED (this version): tables are created only once ever (marker schema_v2) + indexes; admin pages read the database in parallel; the admin list is cached 30 s;
+//   a pick needs 2 database round trips (the secret-bonus setting is kept in the GameHub memory); the round-end screen no longer waits for the winners' Telegram messages.
+// BROADCAST: /broadcast text sends to ALL registered players from ONE command, in the background (about 25 messages per second = Telegram's safe speed). /more = progress, /stopbroadcast = stop.
+//   It runs in a separate GameHub instance named "bc" (Durable Object alarms), so it never slows the game.
 import { DurableObject } from 'cloudflare:workers';
 const LOBBY_MS = 40000, CALL_MS = 4000, REST_MS = 8000, CUT = 0.8, MAXC = 2, TOTAL = 600, MIN_DEP = 30, MIN_WD = 50, MIN_TR = 10;
 const C = x => Math.round(Number(x) * 100), B = c => c / 100;
-const welcomeC = env => C(env.WELCOME_BONUS ?? 10); // one-time gift when a player registers
+const welcomeC = env => 0; // the welcome gift is switched off for good: nobody gets money for joining
 const bonusC = env => C(env.DAILY_BONUS ?? 0), // daily bonus is off unless DAILY_BONUS is set
    bonusPeriod = now => Math.floor((now - 5 * 36e5) / 864e5); // new period starts 08:00 Ethiopia time (05:00 UTC)
 const refreshBonusStmt = (env, id, now) => env.DB.prepare('UPDATE users SET bonus_c=?1,bonus_period=?2 WHERE id=?3 AND (bonus_period<?2 OR (?1=0 AND bonus_c<>0))').bind(bonusC(env), bonusPeriod(now), id); // resets to the daily amount (0 = off), never added on top
 const refreshBonus = (env, id, now) => refreshBonusStmt(env, id, now).run();
 const rnd32 = () => crypto.getRandomValues(new Uint32Array(1))[0];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { 'content-type': 'application/json' } });
 
 /* ---------- pure game logic (same card generator as the app) ---------- */
@@ -69,10 +56,10 @@ const FT = s => String(s).toUpperCase().slice(0, 12); // bank references (FT…)
 // Reads a "money received" SMS. Returns { bank, amount_c, txid } or null (money-sent messages and anything else are ignored).
 //  Telebirr: "… 300.00 ብር በ 10/10/2026 11:14:57 ተቀብለዋል። የሂሳብ እንቅስቃሴ ቁጥርዎ DJA8MMWD4O ነዉ።"
 //  BOA:      "… was credited with ETB 50.00 by NAME … Receipt: https://cs.bankofabyssinia.com/slip/?trx=FT2627850CY910104"
-//  Dashen 1: "You have received ETB 6,000.00 from NAME on 2026-09-29 at 09:48:09 with transaction reference: 112WDTS262720002." (has a reference number)
-//  Dashen 2: "… credited with ETB 40.00 … on 05/10/2026 at 11:24:14 PM. Your current balance is ETB 303.20." (no reference number, so the id is built from date + time + balance)
+//  Dashen 1: "You have received ETB 6,000.00 from NAME on 2026-09-29 at 09:48:09 with transaction reference: 112WDTS262720002."
+//  Dashen 2: "… credited with ETB 40.00 … on 05/10/2026 at 11:24:14 PM. Your current balance is ETB 303.20." (id built from date + time + balance)
 //  CBE:      "… Credited with ETB … Ref No FT26283XXXXX …" (format not tested with a real sample yet)
-//  M-Pesa / E-birr: no reader yet (send a real SMS from each to add one); until then those deposits are approved by verify.et (M-Pesa) or the admin.
+//  M-Pesa / E-birr: no reader yet; those deposits are approved by verify.et (M-Pesa) or the admin.
 export function parseBank(t) {
   t = String(t || '');
   let a, i, m;
@@ -121,8 +108,8 @@ export async function verifyInit(initData, token, maxAge = 86400) {
 const tg = (env, method, body) => fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => { });
 // Owners come from the ADMIN_TG_ID secret (can hold several ids: 111,222). Extra admins live in the database and are managed with /addadmin /removeadmin /admins.
 const owners = env => String(env.ADMIN_TG_ID || '').split(',').map(s => s.trim()).filter(Boolean);
-let adminsReady = false;
-const dbAdmins = async env => { try { if (!adminsReady) { await env.DB.prepare('CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY,added_ts INTEGER)').run(); adminsReady = true } return (await env.DB.prepare('SELECT id FROM admins').all()).results.map(r => String(r.id)) } catch (e) { return [] } };
+let admCache = { t: 0, l: [] }; // the database admin list is cached for 30 seconds (say() asks for it on every message that has a play button)
+const dbAdmins = async env => { if (Date.now() - admCache.t < 30000) return admCache.l; try { await ensureTables(env); const l = (await env.DB.prepare('SELECT id FROM admins').all()).results.map(r => String(r.id)); admCache = { t: Date.now(), l }; return l } catch (e) { return admCache.l } };
 const admins = async env => [...new Set([...owners(env), ...await dbAdmins(env)])];
 const isOwner = (env, id) => owners(env).includes(String(id));
 const isAdmin = async (env, id) => isOwner(env, id) || (await dbAdmins(env)).includes(String(id));
@@ -150,7 +137,7 @@ const menuKb = env => [
   [{ text: 'አስተላልፍ 🎁', callback_data: 'm:tr' }, { text: 'አውጣ 🤑', callback_data: 'm:wd' }],
   [{ text: 'ጋብዝ 🔗', callback_data: 'm:inv' }]];
 const sendMenu = (env, chat, text) => say(env, chat, text, menuKb(env));
-const askContact = (env, uid) => sendTo(env, uid, '👋 እንኳን ወደ አማን ቢንጎ በደህና መጡ!\n\nለመመዝገብ ከታች ያለውን «📱 ስልክ ቁጥሬን አጋራ» ቁልፍ ይጫኑ።' + (welcomeC(env) > 0 ? `\n🎁 ሲመዘገቡ ${B(welcomeC(env))} ብር ስጦታ ያገኛሉ!` : ''), SHARE_KB);
+const askContact = (env, uid) => sendTo(env, uid, '👋 እንኳን ወደ አማን ቢንጎ በደህና መጡ!\n\nለመመዝገብ ከታች ያለውን «📱 ስልክ ቁጥሬን አጋራ» ቁልፍ ይጫኑ።', SHARE_KB);
 const instructionText = `📖 እንዴት ይጫወታሉ?\n\n1️⃣ «ገንዘብ አስገባ» ን ተጭነው ገንዘብ ያስገቡ (ቢያንስ ${MIN_DEP} ብር)።\n2️⃣ «ተጫወት» ን ተጭነው ጨዋታውን ይክፈቱ።\n3️⃣ ከ1 እስከ ${TOTAL} ካርቴላ ይምረጡ — እስከ ${MAXC} ካርቴላ መያዝ ይቻላል።\n4️⃣ ቁጥሮች ሲጠሩ ካርዱ ላይ ምልክት ይደረጋል። መስመር (ወደጎን፣ ወደታች ወይም ዲያጎናል) ወይም 4ቱን ማዕዘኖች የሞላ ካርቴላ ያሸንፋል።\n5️⃣ አሸናፊው ከጠቅላላው ድርሻ ${Math.round(CUT * 100)}% ያገኛል። ጨዋታ ለመጀመር ቢያንስ 2 ተጫዋች ያስፈልጋል።\n6️⃣ ለማውጣት «አውጣ» ን ይጫኑ (ቢያንስ ${MIN_WD} ብር)።\n\nጥያቄ ካለዎት: ${SUPPORT}`;
 const KBNOTE = '⌨️ አዲስ! ከታች ያሉትን ቁልፎች (ጨዋታ ተጫወት፣ ገንዘብ አስገባ፣ ቀሪ ሂሳብ) መጠቀም ይችላሉ።';
 
@@ -182,7 +169,7 @@ const getState = async (env, uid) => { const r = await env.DB.prepare('SELECT st
 const clearState = (env, uid) => env.DB.prepare('DELETE FROM bot_state WHERE uid=?').bind(uid).run();
 const hasDeposit = async (env, uid) => !!(await env.DB.prepare("SELECT 1 x FROM deposits WHERE user_id=? AND status='approved' LIMIT 1").bind(uid).first());
 
-async function onContact(env, m) { // the player shared their phone number: register and give the welcome bonus
+async function onContact(env, m) { // the player shared their phone number: register (no bonus) and show the play buttons
   const db = env.DB, uid = m.from.id, c = m.contact, now = Date.now();
   if (c.user_id && Number(c.user_id) !== Number(uid)) return sendTo(env, uid, '⚠️ እባክዎ የራስዎን ስልክ ቁጥር ብቻ ያጋሩ።', SHARE_KB);
   const ph = normPhone(c.phone_number);
@@ -192,11 +179,11 @@ async function onContact(env, m) { // the player shared their phone number: regi
   const u = await db.prepare('SELECT phone FROM users WHERE id=?').bind(uid).first();
   if (u && u.phone) { await sendBottom(env, uid, '✅ አስቀድመው ተመዝግበዋል።'); return sendMenu(env, uid, '🎮 ከታች ካሉት አማራጮች ይምረጡ።') }
   let ok = false;
-  try { ok = (await db.prepare("UPDATE users SET name=?1,phone=?2,balance=balance+?3 WHERE id=?4 AND (phone IS NULL OR phone='')").bind(nm, ph, welcomeC(env), uid).run()).meta.changes > 0 }
+  try { ok = (await db.prepare("UPDATE users SET name=?1,phone=?2 WHERE id=?3 AND (phone IS NULL OR phone='')").bind(nm, ph, uid).run()).meta.changes > 0 }
   catch (e) { return sendTo(env, uid, `⚠️ ይህ ስልክ ቁጥር በሌላ አካውንት ተመዝግቧል። ለእርዳታ ${SUPPORT} ያነጋግሩ።`, SHARE_KB) }
   if (!ok) { await sendBottom(env, uid, '✅ አስቀድመው ተመዝግበዋል።'); return sendMenu(env, uid, '🎮 ከታች ካሉት አማራጮች ይምረጡ።') }
-  await sendBottom(env, uid, '✅ ተመዝግበዋል!' + (welcomeC(env) > 0 ? ` የ ${B(welcomeC(env))} ብር ስጦታ ተሰጥቶዎታል።` : '') + '\n\nለመጫወት ወይም ገንዘብ ለማስገባት ከታች ያሉትን ቁልፎች ይጫኑ።');
-  return sendMenu(env, uid, '🎮 ለመጫወት «ተጫወት» ን ይጫኑ።');
+  await sendBottom(env, uid, 'እንኳን ደስ አሎት ተመዝግበዋል'); // the bottom keyboard (play buttons)
+  return sendMenu(env, uid, '🎮 ከታች ካሉት አማራጮች ይምረጡ።'); // the inline menu with the Play button
 }
 
 /* ---------- money operations (each is one atomic batch) ---------- */
@@ -248,8 +235,7 @@ async function decideWithdraw(env, id, paid) {
 /* ---------- verify.et: automatic deposit check ----------
    Answers 'ok' only when the receipt is real AND the amount equals the claimed amount AND the money went to OUR account AND the receipt is not older than 72 hours.
    'bad' = it clearly disagrees (the credit is held for the admin). 'unknown' = no clear answer (nothing is credited, nothing is rejected).
-   Telebirr and M-Pesa are sent (BOA needs an account suffix and E-birr has several receipt types, so those two are not sent yet).
-   One call costs one verify.et credit, so it runs once per deposit (the same Idempotency-Key is reused on a re-check) and only when VERIFYET_KEY is set and the amount is at least VERIFYET_MIN birr (default 0). */
+   Telebirr and M-Pesa are sent. One call costs one verify.et credit, so it runs once per deposit and only when VERIFYET_KEY is set and the amount is at least VERIFYET_MIN birr (default 0). */
 const VET_BANK = { telebirr: 'telebirr', mpesa: 'mpesa' };
 const vetMax = env => env.VERIFYET_AUTO_MAX === undefined || env.VERIFYET_AUTO_MAX === '' ? 1000 : Number(env.VERIFYET_AUTO_MAX); // the biggest deposit verify.et may credit ALONE (0 = never alone)
 async function vetCheck(env, bank, txid, amount_c) {
@@ -288,7 +274,7 @@ async function vetGate(env, u, amount_c, bank, txid) {
   if (hold || v.verdict !== 'skip') await env.DB.prepare('INSERT OR REPLACE INTO verify_log(txid,bank,verdict,detail,ts) VALUES(?,?,?,?,?)').bind(txid, bank, hold ? (v.verdict === 'bad' ? 'bad' : 'hold') : v.verdict, (hold ? hold + (v.note && v.note !== hold ? ' · ' + v.note : '') : v.note).slice(0, 300), Date.now()).run().catch(() => { });
   return { hold, note: v.note, verdict: v.verdict };
 }
-// credits a pending deposit once, because verify.et confirmed it (real receipt + paid to our account + same amount). Guarded by status='pending' so it can never pay twice, even together with the SMS match.
+// credits a pending deposit once, because verify.et confirmed it. Guarded by status='pending' so it can never pay twice, even together with the SMS match.
 async function autoApprove(env, id) {
   const db = env.DB;
   const r = await db.batch([
@@ -303,8 +289,7 @@ async function autoApprove(env, id) {
   }
   return false;
 }
-// manual approval: LOCKED by default, a deposit is credited only by the SMS match or verify.et. Set ALLOW_MANUAL_DEPOSIT=1 in Cloudflare to allow the admin Approve button on every pending deposit.
-// EXCEPTION: a deposit that is HELD (verify_log verdict 'bad' / 'hold': the automatic credit was blocked) always gets the ✅ አጽድቅ button, because only the admin can decide it.
+// manual approval: LOCKED by default. A HELD deposit (verify_log verdict 'bad' / 'hold') always gets the ✅ አጽድቅ button, because only the admin can decide it.
 const manualDep = env => env.ALLOW_MANUAL_DEPOSIT === '1';
 const isHeld = async (env, txid) => { try { await ensureTables(env); const v = await env.DB.prepare('SELECT verdict FROM verify_log WHERE txid=?').bind(txid).first(); return !!v && (v.verdict === 'bad' || v.verdict === 'hold') } catch (e) { return false } };
 const heldById = async (env, id) => { const d = await env.DB.prepare("SELECT txid FROM deposits WHERE id=? AND status='pending'").bind(id).first(); return !!d && await isHeld(env, d.txid) };
@@ -323,8 +308,7 @@ async function recheckDeposit(env, id) {
   if (ok) return { ok: true, text: '✅ ተጠናቋል — ገቢው ተጨምሯል' };
   return { ok: false, text: (gate.hold ? '⛔ ' + gate.hold : gate.note || 'verify.et ምንም አላረጋገጠም') + (gate.hold ? '' : gate.verdict === 'ok' ? '\n(በverify.et ብቻ ለማጽደቅ መጠኑ ከ' + vmax + ' ብር በላይ ነው — በእጅ ያጽድቁ)' : '') };
 }
-// a deposit request (from the app or from the bot): auto-credited when a matching bank SMS (same transaction number and amount) was already forwarded to /sms, otherwise sent to the admins and credited the moment the SMS arrives.
-// A held deposit (verify.et clearly disagrees, a big first deposit, a repeat offender, or above VERIFYET_AUTO_MAX for the verify.et way) is never credited automatically: the admin decides (and only then the ✅ አጽድቅ button is shown).
+// a deposit request (from the app or from the bot): auto-credited when a matching bank SMS was already forwarded to /sms, otherwise sent to the admins and credited the moment the SMS arrives.
 async function makeDeposit(env, u, amt, txid, method) {
   const db = env.DB, now = Date.now(); let id;
   if ((await db.prepare("SELECT COUNT(*) c FROM deposits WHERE user_id=? AND status='pending'").bind(u.id).first()).c >= 3) return { error: 'too_many_pending' }; // fake-claim guard: no more than 3 unconfirmed requests per player
@@ -336,8 +320,7 @@ async function makeDeposit(env, u, amt, txid, method) {
   if (!ok) await notifyAdmins(env, depositText({ manual: (manualDep(env) || gate.hold) ? '1' : '', id, name: u.name, phone: u.phone, amount_c: C(amt), method, txid, held: gate.hold, flags: await depositChecks(env, u, { amount_c: C(amt), method, txid }, gate) }), depKb(env, id, method, !!gate.hold));
   return { status: ok ? 'approved' : 'pending', id, held: !!gate.hold };
 }
-// Fake-text scan. Money is credited automatically ONLY when the real bank SMS (forwarded by the SMS app) has the same transaction number AND the same amount, so a made-up or edited text can never add balance by itself.
-// For a deposit that is NOT matched, the admin gets these checks so a forged claim is easy to spot before pressing Approve.
+// Fake-text scan: for a deposit that is NOT matched, the admin gets these checks so a forged claim is easy to spot before pressing Approve.
 async function depositChecks(env, u, d, gate) {
   const db = env.DB, f = [], t = d.txid;
   if (gate && gate.hold) f.push('⛔ ራስ-ሰር መጨመር ተቆልፏል — አስተዳዳሪ ብቻ ያጸድቃል: ' + gate.hold);
@@ -352,10 +335,11 @@ async function depositChecks(env, u, d, gate) {
   f.push(`👤 ቀድሞ የጸደቁ ገቢዎች: ${h.ok} · ውድቅ የተደረጉ: ${h.rej}` + (Date.now() - (u.created_ts || Date.now()) < 864e5 ? ' · 🆕 አዲስ አካውንት (ከ24 ሰዓት በታች)' : '') + (h.ok === 0 ? ' · የመጀመሪያ ገቢ' : ''));
   return f.join('\n');
 }
-// what the admin sees under a withdrawal request: how much this player really deposited and HOW it was approved, so a fake deposit is spotted before money is sent
+// what the admin sees under a withdrawal request: how much this player really deposited and HOW it was approved (the two reads run together)
 async function wdInfo(env, uid) {
-  const r = await env.DB.prepare("SELECT COALESCE(SUM(CASE WHEN status='approved' THEN amount_c END),0) dep,COALESCE(SUM(CASE WHEN status='approved' AND note='admin' THEN amount_c END),0) adm,COALESCE(SUM(CASE WHEN status='approved' AND note='verify.et' THEN amount_c END),0) vet,COALESCE(SUM(status='approved'),0) n FROM deposits WHERE user_id=?").bind(uid).first();
-  const w = await env.DB.prepare("SELECT COALESCE(SUM(amount_c),0) paid FROM withdrawals WHERE user_id=? AND status='paid'").bind(uid).first();
+  const [r, w] = await Promise.all([
+    env.DB.prepare("SELECT COALESCE(SUM(CASE WHEN status='approved' THEN amount_c END),0) dep,COALESCE(SUM(CASE WHEN status='approved' AND note='admin' THEN amount_c END),0) adm,COALESCE(SUM(CASE WHEN status='approved' AND note='verify.et' THEN amount_c END),0) vet,COALESCE(SUM(status='approved'),0) n FROM deposits WHERE user_id=?").bind(uid).first(),
+    env.DB.prepare("SELECT COALESCE(SUM(amount_c),0) paid FROM withdrawals WHERE user_id=? AND status='paid'").bind(uid).first()]);
   return `📊 ጠቅላላ የጸደቀ ገቢ: ${B(r.dep)} ብር (${r.n} ጊዜ) · ቀድሞ የተከፈለ: ${B(w.paid)} ብር\n   በአስተዳዳሪ በእጅ የጸደቀ: ${B(r.adm)} · በverify.et ብቻ የጸደቀ: ${B(r.vet)}`;
 }
 // a withdrawal request: balance is taken now and given back if an admin rejects it
@@ -376,23 +360,40 @@ async function makeTransfer(env, u, to, amt) {
   return r[1].meta.changes > 0 ? { ok: true } : { error: 'insufficient_balance' };
 }
 
-/* ---------- settings, bans and admin log (tables are created automatically) ---------- */
+/* ---------- settings, bans and admin log (tables are created ONCE ever, then a marker is stored) ---------- */
 let tablesReady = false;
-const ensureTables = async env => { if (tablesReady) return; await env.DB.batch([
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY,v TEXT)'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS bans(id INTEGER PRIMARY KEY)'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT,ts INTEGER,actor TEXT,action TEXT,detail TEXT)'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS bot_state(uid INTEGER PRIMARY KEY,step TEXT,data TEXT,ts INTEGER)'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS kb_sent(uid INTEGER PRIMARY KEY)'), // players who already received the bottom keyboard
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS referrals(user_id INTEGER PRIMARY KEY,ref_id INTEGER,ts INTEGER)'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS bonus_wins(round_id INTEGER,cartela INTEGER,user_id INTEGER,name TEXT,amount_c INTEGER,paid INTEGER DEFAULT 0,ts INTEGER,PRIMARY KEY(round_id,cartela))'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_games(week INTEGER,user_id INTEGER,games INTEGER DEFAULT 0,PRIMARY KEY(week,user_id))'), // games played per player in a weekly-bonus period (week = the start time of the period, set by the admin)
-  env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_wk_games ON wk_games(week,games DESC)'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_paid(week INTEGER PRIMARY KEY,ts INTEGER)'), // periods whose prizes were already paid (a period can be paid only once)
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_winners(week INTEGER,pos INTEGER,user_id INTEGER,name TEXT,prize_c INTEGER,games INTEGER,PRIMARY KEY(week,pos))'),
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS verify_log(txid TEXT PRIMARY KEY,bank TEXT,verdict TEXT,detail TEXT,ts INTEGER)'), // verify.et second opinion per deposit; verdict bad / hold = automatic credit is blocked, ok / unknown = information only
-  env.DB.prepare('CREATE TABLE IF NOT EXISTS account_imgs(bank TEXT PRIMARY KEY,data TEXT,ts INTEGER)')]); // deposit account pictures (kept out of settings so the hot settings read stays small)
-  try { await env.DB.prepare('SELECT auto_off FROM users LIMIT 1').first() } catch (e) { try { await env.DB.prepare('ALTER TABLE users ADD COLUMN auto_off INTEGER DEFAULT 0').run() } catch (e2) { } }
+const SCHEMA_MARK = 'schema_v2';
+const INDEXES = [ // speed: the players list, deposits, withdrawals, rounds and picks are looked up by these columns
+  'CREATE INDEX IF NOT EXISTS idx_users_created ON users(created_ts)',
+  'CREATE INDEX IF NOT EXISTS idx_dep_user ON deposits(user_id,status)',
+  'CREATE INDEX IF NOT EXISTS idx_dep_status ON deposits(status,ts)',
+  'CREATE INDEX IF NOT EXISTS idx_wd_user ON withdrawals(user_id,status)',
+  'CREATE INDEX IF NOT EXISTS idx_wd_status ON withdrawals(status)',
+  'CREATE INDEX IF NOT EXISTS idx_rounds_status ON rounds(status,ended_ts)',
+  'CREATE INDEX IF NOT EXISTS idx_picks_user ON picks(round_id,user_id)'];
+const ensureTables = async env => {
+  if (tablesReady) return;
+  let ok = false; try { ok = !!(await env.DB.prepare('SELECT 1 x FROM settings WHERE k=?').bind(SCHEMA_MARK).first()) } catch (e) { }
+  if (!ok) { // first run after this update (or a brand-new database): create everything once
+    await env.DB.batch([
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY,v TEXT)'),
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS bans(id INTEGER PRIMARY KEY)'),
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY,added_ts INTEGER)'),
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT,ts INTEGER,actor TEXT,action TEXT,detail TEXT)'),
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS bot_state(uid INTEGER PRIMARY KEY,step TEXT,data TEXT,ts INTEGER)'),
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS kb_sent(uid INTEGER PRIMARY KEY)'), // players who already received the bottom keyboard
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS referrals(user_id INTEGER PRIMARY KEY,ref_id INTEGER,ts INTEGER)'),
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS bonus_wins(round_id INTEGER,cartela INTEGER,user_id INTEGER,name TEXT,amount_c INTEGER,paid INTEGER DEFAULT 0,ts INTEGER,PRIMARY KEY(round_id,cartela))'),
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_games(week INTEGER,user_id INTEGER,games INTEGER DEFAULT 0,PRIMARY KEY(week,user_id))'), // games played per player in a weekly-bonus period
+      env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_wk_games ON wk_games(week,games DESC)'),
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_paid(week INTEGER PRIMARY KEY,ts INTEGER)'), // periods whose prizes were already paid (a period can be paid only once)
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS wk_winners(week INTEGER,pos INTEGER,user_id INTEGER,name TEXT,prize_c INTEGER,games INTEGER,PRIMARY KEY(week,pos))'),
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS verify_log(txid TEXT PRIMARY KEY,bank TEXT,verdict TEXT,detail TEXT,ts INTEGER)'), // verify.et second opinion per deposit; bad / hold = automatic credit is blocked
+      env.DB.prepare('CREATE TABLE IF NOT EXISTS account_imgs(bank TEXT PRIMARY KEY,data TEXT,ts INTEGER)')]); // deposit account pictures
+    try { await env.DB.prepare('SELECT auto_off FROM users LIMIT 1').first() } catch (e) { try { await env.DB.prepare('ALTER TABLE users ADD COLUMN auto_off INTEGER DEFAULT 0').run() } catch (e2) { } }
+    for (const sql of INDEXES) { try { await env.DB.prepare(sql).run() } catch (e) { } } // one failing index never blocks the others
+    try { await env.DB.prepare('INSERT OR REPLACE INTO settings(k,v) VALUES(?,?)').bind(SCHEMA_MARK, '1').run() } catch (e) { }
+  }
   tablesReady = true };
 const cfg = { t: 0, set: {}, bans: new Set() }; // settings and bans are cached for 5 seconds to keep requests fast
 const loadCfg = async env => { if (Date.now() - cfg.t < 5000) return cfg; await ensureTables(env); const [a, b] = await env.DB.batch([env.DB.prepare('SELECT k,v FROM settings'), env.DB.prepare('SELECT id FROM bans')]); cfg.set = Object.fromEntries(a.results.map(r => [r.k, r.v])); cfg.bans = new Set(b.results.map(r => String(r.id))); cfg.t = Date.now(); return cfg };
@@ -407,8 +408,8 @@ const wkCfg = async env => { try { const c = JSON.parse(await getSet(env, 'wk_cf
 const wkRunning = (c, now) => !!(c.on && c.start > 0 && now >= c.start && now < c.end);
 
 /* ---------- secret bonus (admin chooses cartelas for one round; the taker wins at once) ----------
-   Stored in settings as {"on":true,"round":12,"items":[{"c":7,"a":5000}]} (a = cents). Read straight from the database (never cached)
-   so a pick can never miss a bonus the admin has just saved. The cartela numbers are never sent to the players. */
+   Stored in settings as {"on":true,"round":12,"items":[{"c":7,"a":5000}]} (a = cents). The GameHub reads it from the database when a lobby is loaded or after the admin saves
+   (invalidate), and keeps it in memory, so a pick no longer needs a database read for it. The cartela numbers are never sent to the players. */
 const readBonus = async env => { await ensureTables(env); const r = await env.DB.prepare("SELECT v FROM settings WHERE k='bonus'").first(); try { const c = r && JSON.parse(r.v); return c && c.on && Array.isArray(c.items) && c.items.length ? c : null } catch (e) { return null } };
 const bonusFor = async (env, roundId) => { const c = await readBonus(env); return c && c.round === roundId ? c : null };
 // pays the bonus to the player who just took the cartela. One batch: the win row is created once, the balance is added only while paid=0, then paid=1 — so it can never pay twice.
@@ -456,6 +457,7 @@ async function refreshManual(env, r, rc, now) { // players with Automatic switch
   if (now - rc.mt < 2000) return; rc.mt = now;
   rc.manual = new Set((await env.DB.prepare('SELECT DISTINCT p.user_id FROM picks p JOIN users u ON u.id=p.user_id WHERE p.round_id=? AND u.auto_off=1').bind(r.id).all()).results.map(x => x.user_id));
 }
+let bgWait = null; // set by the GameHub: keeps a background promise alive (the winners' Telegram messages)
 async function settle(env, r, picks, w, now) { // pays the winners and ends the round; returns false if another request already did
   await ensureTables(env);
   const db = env.DB, prize = Math.floor(picks.length * r.stake_c * CUT), share = Math.floor(prize / w.picks.length);
@@ -468,7 +470,9 @@ async function settle(env, r, picks, w, now) { // pays the winners and ends the 
   const done = res[res.length - 1].meta.changes > 0;
   if (done) { // only the request that really ended the round gets here, so every winner receives the message exactly once
     const per = new Map(); for (const p of w.picks) per.set(p.user_id, (per.get(p.user_id) || 0) + share); // a player with two winning cartelas gets one message with the total
-    await Promise.all([...per].map(([id, c]) => tg(env, 'sendMessage', { chat_id: id, text: `ዙር ${r.id} አሸናፊ ሆነዋል ብር = ${B(c)}` })));
+    // NOT awaited: the round-end screen must not wait for Telegram (the money is already paid above)
+    const pm = Promise.all([...per].map(([id, c]) => tg(env, 'sendMessage', { chat_id: id, text: `ዙር ${r.id} አሸናፊ ሆነዋል ብር = ${B(c)}` }))).catch(() => { });
+    if (bgWait) bgWait(pm);
   }
   return done;
 }
@@ -528,20 +532,37 @@ async function advance(env) {
   return r;
 }
 
+/* ---------- broadcast helper (used by the "bc" GameHub instance) ---------- */
+async function bcSend(env, id, text) { // one message with the play button; waits and retries once when Telegram says "too many requests"
+  const useP = env.PROMO_PHOTO && text.length <= 1000, kb = { inline_keyboard: playKb(env) };
+  for (let t = 0; t < 2; t++) {
+    const r = await (useP ? tg(env, 'sendPhoto', { chat_id: id, photo: env.PROMO_PHOTO, caption: text, reply_markup: kb }) : tg(env, 'sendMessage', { chat_id: id, text, reply_markup: kb }));
+    if (!r) return false;
+    if (r.status === 429) { let w = 3; try { w = (await r.json()).parameters.retry_after || 3 } catch (e) { } await sleep(Math.min(30, w) * 1000); continue }
+    return r.ok;
+  }
+  return false;
+}
+
 /* ---------- GameHub: ONE Durable Object that holds the live game in memory ----------
    Every player poll is answered from memory. The database is touched only when something really changes:
    a round starts / ends, a number is called, a player picks or drops a cartela, or money moves.
-   All the truth is still in D1, so if this object is ever restarted it rebuilds itself from the database. */
+   All the truth is still in D1, so if this object is ever restarted it rebuilds itself from the database.
+   The same class is also used by a second instance named "bc" that only runs the broadcast (alarm). */
 export class GameHub extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.round = null; this.picks = []; this.pickRound = 0; this.pv = 0; this.pt = 0; this.nextAt = 0; this.busy = null; this.sh = null;
+    bgWait = p => { try { ctx.waitUntil(p) } catch (e) { } };
+    this.round = null; this.picks = []; this.pickRound = 0; this.pv = 0; this.pt = 0; this.nextAt = 0; this.busy = null; this.sh = null; this.lastOk = 0;
     this.bn = null; this.bv = 0; // bonus info for the open lobby: { round, locked, wins:[{cartela,name,amount}] }  (the secret cartelas are NOT kept here)
+    this.bcfg = null; // the secret bonus setting for the open lobby (kept only in this object's memory)
   }
   async sync() { // returns the current round; asks the database only when the next event is due
     const now = Date.now();
     if (this.round && now < this.nextAt && !(this.round.status === 'lobby' && now - this.pt > 20000)) return this.round;
-    if (!this.busy) this.busy = this.refresh().finally(() => { this.busy = null });
+    if (!this.busy) this.busy = this.refresh().then(() => { this.lastOk = Date.now() }).catch(e => { // a short database hiccup: keep the last known round for up to 15 s instead of failing every player
+      this.nextAt = Date.now() + 500; if (!this.round || Date.now() - this.lastOk > 15000) throw e;
+    }).finally(() => { this.busy = null });
     await this.busy; return this.round;
   }
   async refresh() {
@@ -569,9 +590,11 @@ export class GameHub extends DurableObject {
     try {
       const cf = await bonusFor(this.env, r.id);
       const wins = (await this.env.DB.prepare('SELECT cartela,name,amount_c FROM bonus_wins WHERE round_id=? ORDER BY ts').bind(r.id).all()).results;
+      this.bcfg = cf;
       this.bn = { round: r.id, locked: !!cf, wins: wins.map(w => ({ cartela: w.cartela, name: w.name, amount: B(w.amount_c) })) }; this.bv++;
-    } catch (e) { }
+    } catch (e) { this.pt = 0 } // could not read it: try again on the next request
   }
+  async bonusCfg(roundId) { await this.sync(); return this.bcfg && this.bcfg.round === roundId ? this.bcfg : null } // secret bonus of this round (null = normal round); used by /api/pick
   async current() { return this.sync() } // the current round row, kept fresh
   async state(me) { // same JSON the old stateFor produced; me = { id, auto_off, balance, bonus_c } read fresh by the caller
     const r = await this.sync(), now = Date.now();
@@ -619,8 +642,43 @@ export class GameHub extends DurableObject {
   }
   async manualChanged() { if (rcache) rcache.mt = 0; this.nextAt = 0 } // a player switched Automatic on/off
   async invalidate() { this.nextAt = 0; this.pt = 0; cfg.t = 0 } // admin changed something: re-read (including the bonus) on the next request
+
+  /* ----- broadcast to ALL players (runs only in the "bc" instance, one alarm = up to 250 players, about 25 messages per second) ----- */
+  async bcStart(job) {
+    const st = this.ctx.storage, cur = await st.get('bc');
+    if (cur && !cur.done) return { error: 'running', sent: cur.sent, total: cur.total };
+    const total = (await this.env.DB.prepare('SELECT COUNT(*) c FROM users WHERE phone IS NOT NULL').first()).c;
+    await st.put('bc', { text: job.text, chat: job.chat, cursor: 0, sent: 0, fail: 0, total, done: false, ts: Date.now() });
+    await st.setAlarm(Date.now() + 50);
+    return { ok: true, total };
+  }
+  async bcStatus() { return (await this.ctx.storage.get('bc')) || null }
+  async bcStop() {
+    const st = this.ctx.storage, j = await st.get('bc'); if (!j || j.done) return false;
+    j.done = true; j.stopped = true; await st.put('bc', j); try { await st.deleteAlarm() } catch (e) { } return true;
+  }
+  async alarm() {
+    const env = this.env, st = this.ctx.storage, j = await st.get('bc'); if (!j || j.done) return;
+    try {
+      const rows = (await env.DB.prepare('SELECT id FROM users WHERE phone IS NOT NULL AND id>? ORDER BY id LIMIT 250').bind(j.cursor).all()).results;
+      if (!rows.length) {
+        j.done = true; await st.put('bc', j);
+        await tg(env, 'sendMessage', { chat_id: j.chat, text: `✅ ማሰራጨት ተጠናቅቋል።\n📤 ተልኳል: ${j.sent}\n⚠️ አልደረሰም (ቦቱን ያገዱ): ${j.fail}\n👥 ጠቅላላ: ${j.total}` });
+        return;
+      }
+      for (let i = 0; i < rows.length; i += 25) {
+        const cur = await st.get('bc'); if (!cur || cur.done) return; // stopped by /stopbroadcast
+        const t0 = Date.now(), g = rows.slice(i, i + 25), rs = await Promise.all(g.map(r => bcSend(env, r.id, j.text)));
+        for (const ok of rs) ok ? j.sent++ : j.fail++;
+        j.cursor = g[g.length - 1].id; await st.put('bc', j);
+        const w = 1050 - (Date.now() - t0); if (w > 0) await sleep(w); // Telegram's safe speed: about 25 messages per second
+      }
+      await st.setAlarm(Date.now() + 100);
+    } catch (e) { await st.setAlarm(Date.now() + 5000) }
+  }
 }
 const hubOf = env => env.HUB.get(env.HUB.idFromName('main'));
+const bcOf = env => env.HUB.get(env.HUB.idFromName('bc')); // separate instance: the broadcast never slows the game
 const noHub = () => J({ error: 'server_error', detail: 'HUB binding is missing in wrangler.json' }, 500);
 const poke = env => env.HUB ? hubOf(env).invalidate().catch(() => { }) : null;
 
@@ -791,9 +849,9 @@ async function onTelegram(env, up) {
     const list = await admins(env), id = (m.text.split(/\s+/)[1] || '').replace(/\D/g, '');
     if (cmd === '/admins') return say(env, uid, 'አስተዳዳሪዎች፦\n' + list.join('\n'));
     if (!id) return say(env, uid, 'እንዲህ ይላኩ፦ ' + cmd + ' 123456789');
-    if (cmd === '/addadmin') { await db.prepare('INSERT OR IGNORE INTO admins(id,added_ts) VALUES(?,?)').bind(Number(id), Date.now()).run(); await say(env, id, 'አሁን አስተዳዳሪ ሆነዋል። ዳሽቦርዱን ለመክፈት /admin ይላኩ።'); return say(env, uid, '✅ አስተዳዳሪ ተጨምሯል ' + id) }
+    if (cmd === '/addadmin') { await db.prepare('INSERT OR IGNORE INTO admins(id,added_ts) VALUES(?,?)').bind(Number(id), Date.now()).run(); admCache.t = 0; await say(env, id, 'አሁን አስተዳዳሪ ሆነዋል። ዳሽቦርዱን ለመክፈት /admin ይላኩ።'); return say(env, uid, '✅ አስተዳዳሪ ተጨምሯል ' + id) }
     if (isOwner(env, id)) return say(env, uid, 'ባለቤቶች በCloudflare ብቻ ይቀየራሉ።');
-    await db.prepare('DELETE FROM admins WHERE id=?').bind(Number(id)).run(); return say(env, uid, '✅ አስተዳዳሪ ተወግዷል ' + id);
+    await db.prepare('DELETE FROM admins WHERE id=?').bind(Number(id)).run(); admCache.t = 0; return say(env, uid, '✅ አስተዳዳሪ ተወግዷል ' + id);
   }
   if (cmd === '/pending' && await isAdmin(env, uid)) {
     const d = (await db.prepare("SELECT d.*,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending'").all()).results, w = (await db.prepare("SELECT w.*,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status='pending'").all()).results;
@@ -803,22 +861,20 @@ async function onTelegram(env, up) {
     return;
   }
   if ((cmd === '/admin' || text === 'Admin 🛠') && await isAdmin(env, uid)) return tg(env, 'sendMessage', { chat_id: uid, text: 'የአስተዳዳሪ ዳሽቦርድ', reply_markup: { inline_keyboard: [[{ text: 'አስተዳዳሪ ክፈት 🛠', web_app: { url: adminUrl(env) } }]] } });
-  if (isOwner(env, uid) && (cmd === '/broadcast' || cmd === '/more')) {
-    const rd = async k => ((await db.prepare('SELECT v FROM settings WHERE k=?').bind(k).first()) || {}).v || '';
-    if (cmd === '/broadcast') {
-      const t0 = m.text.replace(/^\/broadcast(@\w+)?\s*/i, '');
-      if (!t0) return say(env, uid, 'እንዲህ ይላኩ፦ /broadcast መልዕክትዎ');
-      await setSet(env, 'bc_text', t0); await setSet(env, 'bc_cursor', '0');
+  if (isOwner(env, uid) && (cmd === '/broadcast' || cmd === '/more' || cmd === '/stopbroadcast')) { // ONE command sends to ALL registered players, in the background
+    if (!env.HUB) return say(env, uid, '⚠️ HUB binding is missing in wrangler.json');
+    const bc = bcOf(env);
+    if (cmd === '/stopbroadcast') return say(env, uid, (await bc.bcStop()) ? '⛔ ማሰራጨት ቆሟል።' : 'የሚሰራ ማሰራጨት የለም።');
+    if (cmd === '/more') { // progress
+      const s = await bc.bcStatus();
+      if (!s) return say(env, uid, 'እስካሁን ምንም ማሰራጨት አልተጀመረም። ለመጀመር፦ /broadcast መልዕክትዎ');
+      return say(env, uid, (s.done ? (s.stopped ? '⛔ ቆሟል' : '✅ ተጠናቅቋል') : '⏳ እየተላከ ነው') + `\n📤 ተልኳል: ${s.sent}\n⚠️ አልደረሰም: ${s.fail}\n👥 ጠቅላላ: ${s.total}`);
     }
-    const t = await rd('bc_text'), cur = Number(await rd('bc_cursor') || 0);
-    if (!t) return say(env, uid, 'በ /broadcast መልዕክትዎ ይጀምሩ');
-    const rows = (await db.prepare("SELECT id FROM users WHERE phone IS NOT NULL AND id>? ORDER BY id LIMIT 40").bind(cur).all()).results;
-    if (!rows.length) return say(env, uid, '✅ ማሰራጨት ተጠናቅቋል።');
-    await Promise.all(rows.map(r => env.PROMO_PHOTO
-      ? tg(env, 'sendPhoto', { chat_id: r.id, photo: env.PROMO_PHOTO, caption: t, reply_markup: { inline_keyboard: playKb(env) } })
-      : tg(env, 'sendMessage', { chat_id: r.id, text: t, reply_markup: { inline_keyboard: playKb(env) } })));
-    await setSet(env, 'bc_cursor', String(rows[rows.length - 1].id));
-    return say(env, uid, `📤 ለ${rows.length} ተጫዋቾች ተልኳል። ቀጣዩን ለመላክ /more ይላኩ።`);
+    const t0 = m.text.replace(/^\/broadcast(@\w+)?\s*/i, '');
+    if (!t0) return say(env, uid, 'እንዲህ ይላኩ፦ /broadcast መልዕክትዎ');
+    const r = await bc.bcStart({ text: t0, chat: uid });
+    if (r.error) return say(env, uid, `⏳ ማሰራጨት አሁን እየሰራ ነው (ተልኳል ${r.sent} ከ ${r.total})። ለማቆም /stopbroadcast ይላኩ።`);
+    return say(env, uid, `📤 ማሰራጨት ተጀምሯል — ለሁሉም ${r.total} ተጫዋቾች በራስ-ሰር ይላካል (ወደ ${Math.max(1, Math.ceil(r.total / 25 / 60))} ደቂቃ ይፈጃል)። ሲጨርስ መልዕክት ይደርስዎታል።\nሂደቱን ለማየት /more · ለማቆም /stopbroadcast`);
   }
   if (isOwner(env, uid) && cmd === '/keyboard') { // pushes the bottom keyboard to every registered player, 40 at a time. Send /keyboard again for the next batch, "/keyboard reset" to start over.
     if (/reset/i.test(m.text)) await setSet(env, 'kb_cursor', '0');
@@ -857,30 +913,31 @@ async function adminRoute(req, env, url) {
   await ensureTables(env);
   const db = env.DB, name = url.pathname.replace('/api/admin/', '');
   const b = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
-  const n = async sql => (await db.prepare(sql).first()).v || 0;
   const log = (action, detail) => db.prepare('INSERT INTO admin_log(ts,actor,action,detail) VALUES(?,?,?,?)').bind(Date.now(), actor, action, String(detail || '')).run();
 
-  if (name === 'overview') {
-    return J({
-      players: await n('SELECT COUNT(*) v FROM users'),
-      deposits: B(await n("SELECT SUM(amount_c) v FROM deposits WHERE status='approved'")),
-      deposits_today: B(await n("SELECT SUM(amount_c) v FROM deposits WHERE status='approved' AND ts>=" + startOfDay())), // today = since 00:00 Ethiopia time
-      deposits_today_count: await n("SELECT COUNT(*) v FROM deposits WHERE status='approved' AND ts>=" + startOfDay()),
-      withdrawals: B(await n("SELECT SUM(amount_c) v FROM withdrawals WHERE status='paid'")),
-      pending: (await n("SELECT COUNT(*) v FROM deposits WHERE status='pending'")) + (await n("SELECT COUNT(*) v FROM withdrawals WHERE status='pending'")),
-      rounds: await n("SELECT COUNT(*) v FROM rounds WHERE status='ended'"),
-      held: B(await n('SELECT SUM(balance) v FROM users'))
-    });
+  if (name === 'overview') { // ONE database round trip for all the numbers
+    const o = await db.prepare(`SELECT (SELECT COUNT(*) FROM users) players,
+      (SELECT COALESCE(SUM(amount_c),0) FROM deposits WHERE status='approved') dep,
+      (SELECT COALESCE(SUM(amount_c),0) FROM deposits WHERE status='approved' AND ts>=?1) dep_t,
+      (SELECT COUNT(*) FROM deposits WHERE status='approved' AND ts>=?1) dep_n,
+      (SELECT COALESCE(SUM(amount_c),0) FROM withdrawals WHERE status='paid') wd,
+      (SELECT COUNT(*) FROM deposits WHERE status='pending') pd,
+      (SELECT COUNT(*) FROM withdrawals WHERE status='pending') pw,
+      (SELECT COUNT(*) FROM rounds WHERE status='ended') rounds,
+      (SELECT COALESCE(SUM(balance),0) FROM users) held`).bind(startOfDay()).first(); // today = since 00:00 Ethiopia time
+    return J({ players: o.players, deposits: B(o.dep), deposits_today: B(o.dep_t), deposits_today_count: o.dep_n, withdrawals: B(o.wd), pending: o.pd + o.pw, rounds: o.rounds, held: B(o.held) });
   }
   if (name === 'deposits') { // last 100 credited deposits with the player name (Overview > tap "Deposits today (count)")
     const r = (await db.prepare("SELECT d.id,d.amount_c,d.method,d.note,d.ts,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='approved' ORDER BY d.id DESC LIMIT 100").all()).results;
     return J({ today_ts: startOfDay(), items: r.map(x => ({ id: x.id, name: x.name, phone: x.phone || '', amount: B(x.amount_c), method: x.method, how: x.note || '', ts: x.ts })) });
   }
-  if (name === 'pending') {
-    const d = (await db.prepare("SELECT d.id,d.amount_c,d.method,d.txid,u.name,u.phone,(SELECT amount_c FROM sms_log WHERE txid=d.txid) sms_c,(SELECT verdict||' · '||detail FROM verify_log WHERE txid=d.txid) vet FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending' ORDER BY d.id").all()).results;
-    const w = (await db.prepare("SELECT w.id,w.user_id,w.amount_c,w.method,w.account,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status='pending' ORDER BY w.id").all()).results;
-    for (const x of w) x.info = await wdInfo(env, x.user_id).catch(() => '');
-    const hist = (await db.prepare("SELECT 'deposit' type,d.amount_c,d.method detail,d.status,d.ts,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status IN('approved','rejected') AND d.ts>? UNION ALL SELECT 'withdraw',w.amount_c,w.method||' '||w.account,w.status,w.ts,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status IN('paid','rejected') AND w.ts>? ORDER BY ts DESC LIMIT 60").bind(Date.now() - 864e5, Date.now() - 864e5).all().catch(() => ({ results: [] }))).results;
+  if (name === 'pending') { // the three lists are read at the same time, and each withdrawal's history too
+    const [dr, wr, hr] = await Promise.all([
+      db.prepare("SELECT d.id,d.amount_c,d.method,d.txid,u.name,u.phone,(SELECT amount_c FROM sms_log WHERE txid=d.txid) sms_c,(SELECT verdict||' · '||detail FROM verify_log WHERE txid=d.txid) vet FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status='pending' ORDER BY d.id").all(),
+      db.prepare("SELECT w.id,w.user_id,w.amount_c,w.method,w.account,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status='pending' ORDER BY w.id").all(),
+      db.prepare("SELECT 'deposit' type,d.amount_c,d.method detail,d.status,d.ts,u.name,u.phone FROM deposits d JOIN users u ON u.id=d.user_id WHERE d.status IN('approved','rejected') AND d.ts>? UNION ALL SELECT 'withdraw',w.amount_c,w.method||' '||w.account,w.status,w.ts,u.name,u.phone FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.status IN('paid','rejected') AND w.ts>? ORDER BY ts DESC LIMIT 60").bind(Date.now() - 864e5, Date.now() - 864e5).all().catch(() => ({ results: [] }))]);
+    const d = dr.results, w = wr.results, hist = hr.results;
+    await Promise.all(w.map(async x => { x.info = await wdInfo(env, x.user_id).catch(() => '') }));
     return J({ items: [
       ...d.map(x => ({ type: 'deposit', id: x.id, amount: B(x.amount_c), name: x.name, phone: x.phone, can_vet: !!(env.VERIFYET_KEY && VET_BANK[x.method]), manual: manualDep(env) || /^(bad|hold) /.test(x.vet || ''), detail: x.method + ' · tx ' + x.txid + (x.sms_c == null ? ' · ❌ no matching bank SMS yet' : x.sms_c !== x.amount_c ? ' · 🚨 real SMS says ' + B(x.sms_c) + ' birr (claimed ' + B(x.amount_c) + ')' : ' · ✅ SMS matches') + (x.vet ? ' · 🔎 ' + x.vet : '') })),
       ...w.map(x => ({ type: 'withdraw', id: x.id, amount: B(x.amount_c), name: x.name, phone: x.phone, detail: 'send to ' + x.method + ' ' + x.account + (x.info ? ' · ' + x.info.replace(/\n\s*/g, ' · ') : '') }))
@@ -1110,8 +1167,8 @@ async function route(req, env, url) {
   if (p !== '/api/me' && await isBanned(env, u.id)) return J({ error: 'banned' }, 403);
   if (p === '/api/me') { const dep = (await db.prepare('SELECT amount_c,status,ts FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results, wd = (await db.prepare('SELECT amount_c,status,ts FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 10').bind(u.id).all()).results; const accounts = url.searchParams.get('acc') ? await accountsFor(env, url, false) : undefined; return J({ accounts, id: u.id, name: u.name, phone: u.phone, registered: !!u.phone, balance: B(u.balance), bonus: B(u.bonus_c), deposits: dep.map(x => ({ ...x, amount: B(x.amount_c) })), withdrawals: wd.map(x => ({ ...x, amount: B(x.amount_c) })) }) }
   if (p === '/api/register') { if (u.phone) return J({ error: 'already_registered' }, 409); const ph = normPhone(b.phone), nm = String(b.name || '').trim().slice(0, 30); if (!ph || nm.length < 2) return J({ error: 'bad_input' }, 400);
-    try { const rr = await db.prepare("UPDATE users SET name=?1,phone=?2,balance=balance+?3 WHERE id=?4 AND (phone IS NULL OR phone='')").bind(nm, ph, welcomeC(env), u.id).run(); if (!rr.meta.changes) return J({ error: 'already_registered' }, 409) } catch (e) { return J({ error: 'phone_used' }, 409) }
-    if (welcomeC(env) > 0) await say(env, u.id, `🎉 እንኳን ደስ አለዎት! በተሳካ ሁኔታ ተመዝግበዋል። ${B(welcomeC(env))} ብር ወደ ዋሌትዎ ተጨምሯል።`, playKb(env));
+    try { const rr = await db.prepare("UPDATE users SET name=?1,phone=?2 WHERE id=?3 AND (phone IS NULL OR phone='')").bind(nm, ph, u.id).run(); if (!rr.meta.changes) return J({ error: 'already_registered' }, 409) } catch (e) { return J({ error: 'phone_used' }, 409) }
+    await say(env, u.id, 'እንኳን ደስ አሎት ተመዝግበዋል', playKb(env)); // registered: no bonus, just the congratulations with the play button
     return J({ ok: true }) }
   if (p === '/api/state') { // the hot path: answered from the GameHub's memory, no database work beyond the player lookup above
     if (!env.HUB) return noHub();
@@ -1130,28 +1187,35 @@ async function route(req, env, url) {
     if (r.error) return J({ error: r.error }, 409);
     return J(r.state);
   }
-  if (p === '/api/pick' || p === '/api/unpick') {
+  if (p === '/api/pick' || p === '/api/unpick') { // 2 database round trips: the player lookup above + one batch that also returns the fresh balance
     if (!env.HUB) return noHub();
     const no = Math.floor(Number(b.cartela)); if (!(no >= 1 && no <= TOTAL)) return J({ error: 'bad_input' }, 400);
     const hub = hubOf(env), r = await hub.current();
     if (r.status !== 'lobby' || now - r.start_ts >= LOBBY_MS) return J({ error: 'round_closed' }, 409);
     if (p === '/api/pick' && (await getSet(env, 'paused')) === '1') return J({ error: 'paused' }, 409);
-    const bcf = await bonusFor(env, r.id); // is this a secret-bonus round?
+    const bcf = await hub.bonusCfg(r.id); // is this a secret-bonus round? (kept in the GameHub memory, no database read)
     if (p === '/api/unpick' && bcf) return J({ error: 'locked' }, 409); // bonus round: a taken cartela can never be dropped or changed
+    const selMe = db.prepare('SELECT id,auto_off,balance,bonus_c FROM users WHERE id=?').bind(u.id);
+    let me;
     try {
       if (p === '/api/pick') {
         const res = await retryDb(() => db.batch([
           db.prepare("INSERT INTO picks(round_id,cartela,user_id,bonus_c) SELECT ?1,?2,?3,MIN(?5,(SELECT bonus_c FROM users WHERE id=?3)) WHERE (SELECT COUNT(*) FROM picks WHERE round_id=?1 AND user_id=?3)<?4 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id, MAXC, r.stake_c),
-          db.prepare("UPDATE users SET bonus_c=bonus_c-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3),balance=balance-(?4-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)) WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)").bind(r.id, no, u.id, r.stake_c)]));
+          db.prepare("UPDATE users SET bonus_c=bonus_c-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3),balance=balance-(?4-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)) WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)").bind(r.id, no, u.id, r.stake_c),
+          selMe]));
         if (res[0].meta.changes === 0) return J({ error: 'max_cards', max: MAXC }, 409);
-      } else await retryDb(() => db.batch([
-        db.prepare("UPDATE users SET bonus_c=MIN(?5,bonus_c+(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)),balance=balance+(?4-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)) WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3) AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id, r.stake_c, bonusC(env)),
-        db.prepare("DELETE FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id)]));
+        me = res[2].results[0];
+      } else {
+        const res = await retryDb(() => db.batch([
+          db.prepare("UPDATE users SET bonus_c=MIN(?5,bonus_c+(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)),balance=balance+(?4-(SELECT bonus_c FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3)) WHERE id=?3 AND EXISTS(SELECT 1 FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3) AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id, r.stake_c, bonusC(env)),
+          db.prepare("DELETE FROM picks WHERE round_id=?1 AND cartela=?2 AND user_id=?3 AND EXISTS(SELECT 1 FROM rounds WHERE id=?1 AND status='lobby')").bind(r.id, no, u.id),
+          selMe]));
+        me = res[2].results[0];
+      }
     } catch (e) { return J({ error: errOf(e) }, 409) }
     // The pick above succeeded, so the stake was paid. Only now can a bonus cartela win — a player without enough balance never gets here, so no bonus is shown for them.
     let won = null;
-    if (p === '/api/pick' && bcf) { const it = bcf.items.find(x => x.c === no); if (it) won = await awardBonus(env, r.id, no, u, it.a) }
-    const me = await db.prepare('SELECT id,auto_off,balance,bonus_c FROM users WHERE id=?').bind(u.id).first(); // fresh balance after the stake moved (and the bonus was added)
+    if (p === '/api/pick' && bcf) { const it = bcf.items.find(x => x.c === no); if (it) { won = await awardBonus(env, r.id, no, u, it.a); if (won) me = await selMe.first() } } // the bonus changed the balance: read it again
     const st = await hub.picked(p === '/api/pick' ? 'pick' : 'unpick', r.id, no, u.id, u.name, me, won);
     if (won) {
       await say(env, u.id, `🎉 እንኳን ደስ አለዎት! ካርቴላ #${no} በመያዝ የ${won.amount} ብር ቦነስ አሸንፈዋል! ገንዘቡ ወደ ቀሪ ሂሳብዎ ተጨምሯል።`, playKb(env));
